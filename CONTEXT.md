@@ -1,6 +1,6 @@
 # CONTEXT — the user's current memory setup (baseline we build on)
 
-The system already exists as a **hand-run, file-based, curated** memory. curated-memory adds the two
+The system already exists as a **hand-run, file-based, curated** memory. engram adds the two
 missing commodity layers (semantic recall + a formalized curator) WITHOUT throwing this away — the
 files stay the source of truth.
 
@@ -38,7 +38,7 @@ files stay the source of truth.
 - **Manual staleness caveat** — a hand-rolled temporal-validity guard.
 - **Zero infra** — no service, no DB (values to preserve; user disliked claude-mem's Bun+Chroma daemon).
 
-## Gaps (what curated-memory adds)
+## Gaps (what engram adds)
 1. **No semantic recall** — retrieval is `description`-string match; misses relevant facts phrased differently → **increment (a)**.
 2. **No formalized curator** — curation is fully manual; no contradiction/dedup/staleness handling at write, no propose-diff→approve loop → **increment (b)**.
 3. **MEMORY.md over budget** — needs the recall layer so it can shrink to a true index (detail retrieved on demand).

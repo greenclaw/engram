@@ -1,4 +1,4 @@
-# curated-memory
+# engram
 
 A curated, git-native, plain-text **agent memory system** for Claude Code — the missing
 assembly no existing tool ships: a markdown Zettelkasten as source-of-truth + semantic

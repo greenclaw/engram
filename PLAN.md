@@ -1,4 +1,4 @@
-# PLAN — curated-memory build
+# PLAN — engram build
 
 **Decision (Option i):** build a thin, **service-less** layer over the user's own `memory/*.md`
 (not adopt basic-memory's server). Rationale: (a) semantic recall is commodity but building it thin
