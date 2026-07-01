@@ -73,3 +73,22 @@ def test_recall_auto_rebuilds_after_delete(tmp_path):
     build_index(mem)
     (mem / "pg.md").unlink()
     assert "pg" not in [h.name for h in recall(mem, "database", k=5)]
+
+
+def test_recall_abstains_on_unrelated_query(tmp_path):
+    # nothing in the store is even loosely related → recall returns nothing (abstention),
+    # rather than a confidently-wrong top hit.
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem, "deploy", "Push to main triggers a Coolify rebuild.", "project")
+    _write(mem, "secrets", "Use the secret CLI keyring; never print a value.", "feedback")
+    assert recall(mem, "what is the capital of France?", k=3) == []
+
+
+def test_recall_does_not_over_abstain_on_related_query(tmp_path):
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    _write(mem, "deploy", "Push to main triggers a Coolify rebuild.", "project")
+    _write(mem, "secrets", "Use the secret CLI keyring; never print a value.", "feedback")
+    hits = recall(mem, "how do we redeploy the app?", k=3)
+    assert hits and hits[0].name == "deploy"

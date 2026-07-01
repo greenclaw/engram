@@ -6,6 +6,7 @@ few-hundred-note store a dense matrix + one matmul is plenty — no sqlite-vec, 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,12 @@ from engram.embed import Embedder
 
 INDEX_DIR = ".engram"
 BODY_HEAD = 500  # chars of body embedded alongside the description
+
+# Abstention floor on RAW cosine: drop hits below it so an unrelated query returns nothing rather than
+# a confidently-wrong top hit. Conservative by design — bge-m3's relevant/irrelevant cosine bands
+# overlap (~0.37–0.45), and false abstention (hiding a real memory) is worse than a weak match, so the
+# default sits safely below observed real-hit cosines. A bench-calibrated knob (RESEARCH.md §6).
+RELEVANCE_FLOOR = float(os.environ.get("ENGRAM_RELEVANCE_FLOOR", "0.35"))
 
 
 @dataclass
@@ -100,10 +107,12 @@ def _is_stale(mem_dir: Path) -> bool:
     return any(p.stat().st_mtime > idx_mtime for p in notes)  # a note was edited
 
 
-def recall(mem_dir, query: str, k: int = 5, now: date | None = None) -> list[Hit]:
+def recall(mem_dir, query: str, k: int = 5, now: date | None = None, floor: float | None = None) -> list[Hit]:
     """Return top-k L2 hits (id + description, NOT bodies) ranked by recency×importance×relevance.
-    Auto-rebuilds the index first if the markdown source has drifted (added/edited/deleted notes)."""
+    Auto-rebuilds the index first if the markdown source has drifted (added/edited/deleted notes).
+    Abstains (drops hits below `floor` raw cosine) so an unrelated query returns [] not a wrong hit."""
     now = now or date.today()
+    floor = RELEVANCE_FLOOR if floor is None else floor
     mem_dir = Path(mem_dir)
     if _is_stale(mem_dir):
         build_index(mem_dir)
@@ -136,5 +145,6 @@ def recall(mem_dir, query: str, k: int = 5, now: date | None = None) -> list[Hit
                 score=score(rel_norm, m["importance"], rec),
             )
         )
+    hits = [h for h in hits if h.relevance >= floor]  # abstention: drop weakly-related notes
     hits.sort(key=lambda h: h.score, reverse=True)
     return hits[:k]

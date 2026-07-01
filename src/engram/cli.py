@@ -31,6 +31,8 @@ def main(argv=None) -> int:
             import json
 
             print(json.dumps([h.__dict__ for h in hits], ensure_ascii=False, indent=2))
+        elif not hits:
+            print("(no sufficiently relevant memory)")
         else:
             for h in hits:
                 print(f"{h.score:.3f}  [{h.type}] {h.name} — {h.description}")

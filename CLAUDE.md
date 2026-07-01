@@ -64,7 +64,9 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Robustness policy:** bad notes **fail loud** — `core.MemoryNoteError` names the offending file (invalid YAML, or non-numeric `importance`); one corrupt note aborts the index rather than being silently skipped (curated data must surface).
 
-**Known gap (next):** no **abstention** — recall always returns top-k, and min-max normalization discards the absolute-cosine signal, so an irrelevant query still gets a confident hit. Fix = a raw-cosine floor τ (a bench-calibrated knob). Other untested quality dims: confusables/precision, negation, cross-lingual matrix, exact-keyword regression, scale (>100 notes).
+**Abstention:** recall drops hits below a raw-cosine floor (`RELEVANCE_FLOOR`, default 0.35, env `ENGRAM_RELEVANCE_FLOOR`) → an unrelated query returns `[]` instead of a confident wrong hit. Deliberately conservative: bge-m3's relevant/irrelevant cosine bands **overlap** (~0.37–0.45; measured real-hit min 0.425 vs junk up to 0.44), so no clean τ exists — the default sits safely below real hits (never false-abstains) and only catches blatant off-topic. It's a bench-calibratable §6 knob.
+
+**Still untested quality dims (next):** confusables/precision, negation, cross-lingual matrix, exact-keyword regression, scale (>100 notes).
 
 ## Build plan — next
 
