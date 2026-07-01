@@ -9,7 +9,8 @@ commit**. The approval gate doubles as a memory-poisoning defense.
 ## Status
 - **Research: DONE** (2026-07-01) — see `RESEARCH.md` (3-stream survey: academic + production + open-problems/prior-art, with sources).
 - **Design direction: AGREED** — build a thin, **service-less** layer over the user's own `memory/*.md` (Option **i**), reusing proven mechanisms; the novel value is the **curator (b)**, retrieval (a) is commodity we build thin for zero-infra/full control.
-- **Build: NEXT SESSION.** Start with increment 1 (semantic recall). See `PLAN.md`.
+- **Increment 1 (semantic recall): BUILT + VALIDATED** (2026-07-01) — service-less bge-m3 (ONNX, no service/torch) + `.npy` index + `recency×importance×relevance` recall. Done-when met: semantic **100%@5** vs lexical **0%@5** (A/B, `bench_recall.py`). Commands in `CLAUDE.md`.
+- **Build: increment 2 (curator) is next.** See `PLAN.md`.
 
 ## Why (one paragraph)
 The user already hand-runs the hard part — **curation** (high-signal, human-written topic files + a `MEMORY.md` index + `[[links]]` + `learnings/`), the exact thing automated memory engines fail at. The gaps are the two commodities they lack: **semantic recall** and a **formalized curator loop** (contradiction/staleness handling). Prior art proves each ingredient separately (basic-memory, DiffMem, Hermes, A-MEM, Mem0) but **nobody fused all four** — so this is an *integration gap, not a research gap*. Not a reinvention; a novel assembly.

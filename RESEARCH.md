@@ -84,6 +84,27 @@ gated by human review.
   on the **`Stop` hook**, NOT PreCompact); **MemCP** (intercepts `/compact`, blocks until saved;
   "~20× tokens" = lazy-loading/retrieval-scoping, not compression); **Memory Keeper** (SQLite WAL,
   manual `context_save`/checkpoints, session merge conflict policies, 38 tools).
+- **Hermes-agent (Nous Research)** — **the closest prior-art to our curator (b)**; cloned at
+  `~/projects/hermes-agent` (Python, public). Findings below are **verified from code**, not marketing.
+  *"Self-learning"* = a **background self-improvement review after each turn** that replays the
+  conversation and distills *repeated corrections* + *hard-won workflow lessons* (concrete triggers:
+  save after a 5+-tool-call task, or after a dead-end→working-path) into either a **semantic memory
+  entry** or a **procedural skill** (facts↔procedures split = CoALA); review can run on a cheap aux
+  model. Store (`tools/memory_tool.py`) = markdown `MEMORY.md`(env) + `USER.md`(user), `§`-delimited,
+  **hard CHAR limits (2200/1375, explicitly "model-independent") as the forgetting pressure**; loaded
+  as a **frozen system-prompt snapshot at session start** (mid-session writes apply next session);
+  extra: a **drift-guard** (errors if the file was edited outside the §-format) + **consolidation
+  when over the char limit**. Gate (`tools/write_approval.py`) = per-subsystem `write_approval`,
+  **default OFF ("writes flow freely")**, ON → stage to `pending/{memory,skills}/<id>.json` as a
+  **replayable payload**; skills reviewed via unified `diff`, **foreground memory writes always stage**
+  ("too big to eyeball mid-loop"). Past-conversation search = SQLite **FTS5 (keyword, ~20ms), NOT
+  semantic**. **Two verified gaps (= our integration edge): NO contradiction/reconciliation module**
+  (compatible/contradictory/subsumes absent) and **NO semantic recall over the store** (the whole
+  capped file is injected; FTS5 only over transcripts).
+  → **Steal for increment 2:** candidate-triggers (repeated correction / 5+-tool workflow / dead-end→fix),
+  cheap-aux-model review, replayable-staged-payload gate, drift-guard. → **Our edge:** engram adds
+  *semantic recall over the store* + *contradiction-aware reconciliation* + *gate-on-by-default*
+  (Hermes ships the gate OFF → the exact MINJA poisoning surface RESEARCH §2 warns about).
 
 ## 5. Prior-art verdict — NOT a reinvention (integration gap)
 Every ingredient exists; **no single system fuses all four**:
@@ -100,7 +121,10 @@ Every ingredient exists; **no single system fuses all four**:
   (grep/git only) and **no approval gate** (auto-commit).
 - **basic-memory** — md-SoT + wiki-links + hybrid semantic, but LLM writes files directly (no
   propose-diff→approve, no contradiction reconciliation step).
-- **Hermes** — staged unified-diff + approve/reject, but over skills, not a git-Zettelkasten w/ semantic.
+- **Hermes** — staged unified-diff + approve/reject + a real per-turn self-improvement loop (closest to
+  our curator), but **gate defaults OFF**, memory is a char-capped frozen snapshot with **no semantic
+  recall**, and there is **no contradiction-reconciliation step** (all verified from code, §4). Not over
+  a git-Zettelkasten.
 - **A-MEM** — active curation + note-evolution + LLM-confirmed links, but auto (no gate, no git).
 
 **Reuse (don't reinvent):** markdown-SoT+git, Zettelkasten atomic-notes+links, ADD/UPDATE/DELETE/NOOP
@@ -109,8 +133,63 @@ scoring, decay, offline consolidation.
 **Novel = the assembly + a contradiction-aware curator that emits reviewable diffs over a git-committed
 markdown Zettelkasten, gated before commit.**
 
+## 6. Adaptive rotation policy — research flow (heuristic → auto-tuned → learned)
+The "what to evict / decay / promote / consolidate / invalidate, and with what weights" decision is a
+*policy*. v1 hard-codes it; this flow is how it becomes dynamic **without becoming a research project**.
+**Reward signal for every learned tier is the same instrument: claude-bench (`mem_recall` hit-rate,
+`mem_curate` op-precision, index size). No bench → no honest learning.**
+
+**The binding constraint is label signal, not model capacity** — a personal store is data-starved, so a
+method's viability = *does a signal feed it*, not how sophisticated it is. Three signals gate everything:
+- **S1 — claude-bench:** constructed "fact F is needed" scenarios, clean ground-truth, offline, dozens–
+  hundreds. Feeds weight-tuning + gate-threshold calibration + op-classifier *eval*.
+- **S2 — recall telemetry:** `last_accessed` + hit-counter per note, accumulates online, noisy. Feeds
+  utility regression + decay-τ estimation + eviction.
+- **S3 — git curation history:** approved/rejected diffs = labelled ops, slow accrual (tens/week). Feeds
+  a curator op-classifier once large enough.
+- (S4 — "was the surfaced fact actually used": near-uninstrumentable, noisy — don't rely on it.)
+
+**Learnable decision surface → technique fit** (viability set by signal, not sophistication):
+
+| decision | technique | fit |
+|---|---|---|
+| predict note utility → `importance` + eviction | **logistic/linear regression** on {type, age, recall-count, `[[links]]`-centrality, size} | ✅ **best fit** — tiny-data-safe, interpretable (coeffs = "what makes a memory live"); needs S2 |
+| recall ranking | learning-to-rank | pointwise-LTR = the regression above ✅; pairwise/listwise ❌ early (needs many labelled query–doc) |
+| curator op ADD/UPDATE/DELETE/NOOP | classifier | ⚠️ later — LLM already does it; pays only once S3 is large. Keep LLM+gate for now |
+| score weights + decay τ | auto-ML = HPO (Bayesian / CMA-ES) | ✅ = L1; "full auto-ML" model-search ❌ (a ~6-feature regression has nothing to search) |
+| online keep/evict/promote | contextual bandit | ✅ v2 (S2 = reward); honest RL-lite for single-step decisions |
+| (whole policy) | full RL / neuroevolution | ❌ decision is single-step not sequential → temporal credit-assignment wasted; data-starved |
+
+**Machine-assisted, not machine-decided:** learned models rank/propose to the human gate; they don't
+auto-decide until bench-validated (engram is human-in-the-loop by thesis). Climb only to the tier that pays:
+- **L0 — heuristic (v1, build).** score = recency×importance×relevance (Generative Agents) + Ebbinghaus
+  decay (MemoryBank) + reinforcement-on-hit + `MEMORY.md` size-pressure eviction (MemGPT) + LLM
+  op-adjudication for contradictions. A *fixed-weight dynamic* policy — adaptive per-note, hand-tuned.
+- **L1 — auto-tuned weights (v1.5, the justified "auto-ML").** Don't hand-pick the ~5–7 knobs
+  (α_recency, α_importance, α_relevance, decay τ, evict/promote thresholds); optimize them against the
+  bench objective. Non-differentiable + noisy → derivative-free: **Bayesian optimization** (optuna/skopt)
+  or **CMA-ES / (μ,λ)-ES** (the "evolutionary" option — legit here: black-box search over a few knobs,
+  *not* GP over a whole policy). Generalizes the μ−Zσ gate calibration. Output = a transparent tuned
+  YAML, still service-less. **The tier that actually pays off — few-hundred LOC.**
+- **L2 — contextual bandit (v2, online + data-efficient).** Per-note keep/evict/promote/consolidate as
+  arms; context = note features (type, age, recall-count, `[[links]]`-graph centrality, size); reward =
+  later recall hit / precision held. Thompson sampling / LinUCB. Learns online from real outcomes,
+  degrades gracefully, far more sample-efficient than RL. Where "dynamic / logistics-based" genuinely lives.
+- **L3 — full RL / neuroevolution (research-only, deferred).** RL policy over the AgeMem action space
+  (ADD/UPDATE/DELETE/RETRIEVE/SUMMARY/FILTER) or evolutionary policy search. Honest blocker: needs a
+  reward-labeled env/simulator + many episodes; a personal few-hundred-note store is **data-starved**;
+  AgeMem itself flags the RL-trained policy as the hard, early part. Prototype-able, unlikely to beat
+  L1+L2 on a personal store. Document, don't build.
+
+**Verdict:** the highest-leverage *machine-assisted* piece is **not RL** — it's a **utility-prediction
+regression** (logreg on note features, fed by S2) driving `importance`+eviction, plus **auto-tuned score
+weights** (Bayesian/CMA-ES, fed by S1). Both are tiny-data-safe, interpretable, service-less, and gated on
+telemetry+bench existing → they land **after increment 1** starts logging hits. RL/neuroevolution is the
+seductive-wrong tool here (single-step, data-starved, human-in-loop) — a 6-feature logreg matches it and
+you can read the weights. Prototype it as research, don't ship it in v1.
+
 ## Sources
 Academic: [Generative Agents](https://arxiv.org/abs/2304.03442) · [MemGPT](https://arxiv.org/pdf/2310.08560) · [MemoryBank](https://arxiv.org/pdf/2305.10250) · [A-MEM](https://arxiv.org/abs/2502.12110) · [HippoRAG](https://arxiv.org/abs/2405.14831) · [CoALA](https://arxiv.org/abs/2309.02427) · [Reflexion](https://arxiv.org/abs/2303.11366) · [Sleep-time compute](https://arxiv.org/html/2504.13171v1) · [survey 2603.07670](https://arxiv.org/html/2603.07670v1) · [Awesome-Agent-Memory](https://github.com/TeleAI-UAGI/Awesome-Agent-Memory)
 Open problems: [MemoryAgentBench](https://arxiv.org/pdf/2507.05257) · [AgeMem](https://arxiv.org/html/2601.01885v1) · [MINJA](https://arxiv.org/html/2503.03704) · [SSGM governance](https://arxiv.org/html/2603.11768v1) · [Consolidation problem](https://hindsight.vectorize.io/blog/2026/05/21/agent-memory-consolidation)
 Production: [Mem0](https://arxiv.org/abs/2504.19413) · [Zep/Graphiti](https://arxiv.org/abs/2501.13956) · [Letta blocks](https://docs.letta.com/guides/agents/memory-blocks/) · [Cognee](https://github.com/topoteretes/cognee) · [Supermemory engine](https://supermemory.ai/blog/memory-engine)
-Note-native prior art: [basic-memory](https://github.com/basicmachines-co/basic-memory) · [DiffMem](https://github.com/Growth-Kinetics/DiffMem) · [Hermes gate](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/memory.md) · [Karpathy llm-wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) · [official MCP memory](https://github.com/modelcontextprotocol/servers/blob/main/src/memory/README.md)
+Note-native prior art: [basic-memory](https://github.com/basicmachines-co/basic-memory) · [DiffMem](https://github.com/Growth-Kinetics/DiffMem) · [Hermes-agent repo](https://github.com/NousResearch/hermes-agent) · [Hermes memory docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) · [Hermes skills docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) · [Karpathy llm-wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) · [official MCP memory](https://github.com/modelcontextprotocol/servers/blob/main/src/memory/README.md)
