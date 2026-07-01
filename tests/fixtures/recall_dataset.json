@@ -1,0 +1,31 @@
+{
+  "_note": "Labelled A/B set for increment-1 done-when. Queries are realistic paraphrases with ~0 content-word overlap with their target note, so a lexical (description-string) baseline must miss and only semantic recall can win.",
+  "notes": [
+    {"name": "hosting", "type": "project", "description": "Production runs on Coolify and Hetzner. Not Vercel."},
+    {"name": "secrets", "type": "feedback", "description": "Use the secret CLI backed by the OS keyring. Never print a value."},
+    {"name": "testing", "type": "feedback", "description": "Prefer pytest over unittest. Write the failing test first."},
+    {"name": "packages", "type": "feedback", "description": "JS uses pnpm. Python uses uv. Avoid npm and pip."},
+    {"name": "database", "type": "project", "description": "App data lives in Postgres via Supabase. Local dev in Docker."},
+    {"name": "font", "type": "reference", "description": "Skip Inter and Roboto. Choose an opinionated typeface."},
+    {"name": "commits", "type": "feedback", "description": "Conventional commit format. No AI attribution unless asked."},
+    {"name": "deploy", "type": "project", "description": "A push to main triggers a Coolify webhook rebuild."},
+    {"name": "dns", "type": "reference", "description": "Domain is on Cloudflare, DNS-only, pointing at the server IP."},
+    {"name": "email", "type": "reference", "description": "Transactional mail goes out through Resend."},
+    {"name": "language", "type": "feedback", "description": "Reply in the user's own language: Russian to Russian, English to English."},
+    {"name": "money", "type": "feedback", "description": "Represent currency with Decimal. Never use float for money."}
+  ],
+  "queries": [
+    {"query": "where is the website served from", "expect": "hosting"},
+    {"query": "how do we keep credentials safe", "expect": "secrets"},
+    {"query": "which library for automated checks in code", "expect": "testing"},
+    {"query": "how should I add project dependencies", "expect": "packages"},
+    {"query": "where are records persisted", "expect": "database"},
+    {"query": "guidance on picking fonts for the interface", "expect": "font"},
+    {"query": "how to phrase version control messages", "expect": "commits"},
+    {"query": "what starts a new release", "expect": "deploy"},
+    {"query": "how is the web address routed", "expect": "dns"},
+    {"query": "how are signup confirmations delivered", "expect": "email"},
+    {"query": "на каком языке отвечать собеседнику", "expect": "language"},
+    {"query": "how to avoid rounding errors in prices", "expect": "money"}
+  ]
+}
