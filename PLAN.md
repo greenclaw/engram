@@ -75,9 +75,13 @@ they land.**
   redundant notes, promotes 3+-recurrence learnings to MEMORY.md, evicts low-utility (the "swamping" fix).
 **Reuse:** Mem0 write-engine (top-k→LLM op), AgeMem op-set, Hermes staged-diff+approve, Zep invalidate,
 SSGM provenance/rollback via git, sleep-time offline cadence.
-**Done when:** claude-bench "curator op-precision" — a **labelled candidate set** (facts that should ADD /
-UPDATE-an-existing / NOOP-dup / DELETE-stale) → measure op-accuracy + contradiction-catch, calibrate the
-gate threshold exactly like `calibrate_gate.py` (μ−Zσ over N verifier votes).
+**Done when:** curator op-precision on a **labelled candidate set** → op-accuracy + contradiction-catch,
+then calibrate the gate threshold like `calibrate_gate.py` (μ−Zσ over N verifier votes).
+✅ **Instrument built + first numbers (2026-07-02):** `bench_curate.py` (12 labelled candidates, 4 op
+classes, headless `claude -p`) → **op_accuracy 100%, contradiction_catch 100%, false_invalidate 0 (3/3
+runs)**. *Caveats: clean-case set — an existence proof that skill rules + recall evidence adjudicate
+unambiguous candidates correctly; scores are model-dependent (`--model` flag). μ−Zσ auto-gate calibration
+needs a harder set (value-change vs contradiction boundaries, confusable neighbors) with real variance.*
 
 ## Validation (claude-bench, both increments)
 - Scenario `mem_recall`: does semantic recall find the needed fact? (hit-rate; recall on vs off).

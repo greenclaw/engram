@@ -53,6 +53,7 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 - `uv run engram index --dir <memory/>` then `uv run engram recall "<query>" --dir <memory/> -k 5` — the CLI.
 - `uv run engram curate apply <changeset.json|-> --dir <memory/>` — validate a change-set → show diff → human gate → git commit. `--yes` skips the prompt (**live today** — a deliberate gate-bypass for scripting; the calibrated auto-gate will formalize it).
 - `uv run python bench_recall.py` — the increment-1 done-when A/B (semantic vs lexical hit-rate over `tests/fixtures/recall_dataset.json`).
+- `uv run python bench_curate.py [--runs N] [--model M] [--dry]` — the mem_curate bench: curator op-precision + contradiction-catch on `tests/fixtures/curate_dataset.json`, adjudicated by headless `claude -p` (no API key). First numbers: 100/100/0 × 3 runs on the clean-case set.
 
 Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_only` (never downloads). Override the repo with `ENGRAM_EMBED_REPO`.
 
@@ -76,7 +77,7 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 1. ✅ **`/engram-curate` skill** (`.claude/skills/engram-curate/`) — built TDD-style against a live RED baseline (agent without the skill self-approved the gate via `--yes` and edited MEMORY.md directly; with the skill it stops at the gate). The CLI gate is agent-safe: non-interactive `curate apply` prints the diff and applies nothing — only an explicit `--yes` after user approval writes.
 2. **Live recall wiring** — a hook/skill so surfaced facts come from semantic recall in real sessions (unbuilt increment-1 item; the user's actual pain).
-3. **`mem_curate` bench** — op-precision + contradiction-catch on a labelled candidate set (claude-bench transcript harness, `~/projects/claude-bench`); later calibrate the gate threshold (μ−Zσ) to activate the auto-gate.
+3. ✅ **`mem_curate` bench** (`bench_curate.py`) — measures adjudication in isolation (mechanics are unit-tested): fixture store → recall evidence per candidate → one `claude -p` change-set → score vs labels. 100/100/0 × 3 on the clean-case set. Next for the auto-gate: a **harder** candidate set (boundary cases, confusables) to get variance worth calibrating (μ−Zσ).
 4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.
 
 Increment-1 validation (done): `mem_recall` A/B measured directly — semantic **100%@5** vs lexical **0%@5** on the labelled paraphrase set. *Existence proof, not effect size: the set is built for ~zero lexical overlap; exact-keyword regression/confusables/scale untested; end-to-end effect on assistant answers unmeasured.*
