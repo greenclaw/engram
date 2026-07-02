@@ -18,6 +18,10 @@ def main(argv=None) -> int:
     pr.add_argument("-k", type=int, default=5)
     pr.add_argument("--json", action="store_true", help="emit hits as JSON")
 
+    ph = sub.add_parser("hook", help="UserPromptSubmit hook: print semantic recall for the prompt (stdin JSON)")
+    ph.add_argument("--dir", required=True)
+    ph.add_argument("-k", type=int, default=3)
+
     pc = sub.add_parser("curate", help="apply a Claude-produced change-set (gated git commit)")
     pcs = pc.add_subparsers(dest="curate_cmd", required=True)
     pca = pcs.add_parser("apply", help="validate a change-set, show its diff, gate, commit")
@@ -45,6 +49,26 @@ def main(argv=None) -> int:
         else:
             for h in hits:
                 print(f"{h.score:.3f}  [{h.type}] {h.name} — {h.description}")
+    elif args.cmd == "hook":
+        # A recall failure must NEVER block the user's prompt: any problem → silent exit 0
+        # (warning on stderr). ponytail: availability over strictness is deliberate for a hook.
+        import json
+        import sys
+
+        try:
+            prompt = (json.load(sys.stdin).get("prompt") or "").strip()
+            if len(prompt) < 15 or prompt.startswith("/"):
+                return 0
+            from engram.store import recall
+
+            hits = recall(args.dir, prompt, k=args.k)
+            if hits:
+                print("engram semantic recall (background context; verify before asserting — read the full note at its path if it matters):")
+                for h in hits:
+                    print(f"- [{h.type}] {h.name} — {h.description} ({h.path})")
+        except Exception as e:  # noqa: BLE001
+            print(f"engram hook: {e}", file=sys.stderr)
+        return 0
     elif args.cmd == "curate":
         from engram.curate import apply, load_changeset
 

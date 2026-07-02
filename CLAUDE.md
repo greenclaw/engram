@@ -52,6 +52,7 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 - `uv run pytest tests/test_core.py -q` — fast pure-logic tests only (no model).
 - `uv run engram index --dir <memory/>` then `uv run engram recall "<query>" --dir <memory/> -k 5` — the CLI.
 - `uv run engram curate apply <changeset.json|-> --dir <memory/>` — validate a change-set → show diff → human gate → git commit. `--yes` skips the prompt (**live today** — a deliberate gate-bypass for scripting; the calibrated auto-gate will formalize it).
+- `echo '{"prompt":"..."}' | uv run engram hook --dir <memory/>` — the UserPromptSubmit recall hook (prints L2 hits or nothing).
 - `uv run python bench_recall.py` — the increment-1 done-when A/B (semantic vs lexical hit-rate over `tests/fixtures/recall_dataset.json`).
 - `uv run python bench_curate.py [--runs N] [--model M] [--dry]` — the mem_curate bench: curator op-precision + contradiction-catch on `tests/fixtures/curate_dataset.json`, adjudicated by headless `claude -p` (no API key). First numbers: 100/100/0 × 3 runs on the clean-case set.
 
@@ -76,7 +77,12 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 ## Build plan — next
 
 1. ✅ **`/engram-curate` skill** (`.claude/skills/engram-curate/`) — built TDD-style against a live RED baseline (agent without the skill self-approved the gate via `--yes` and edited MEMORY.md directly; with the skill it stops at the gate). The CLI gate is agent-safe: non-interactive `curate apply` prints the diff and applies nothing — only an explicit `--yes` after user approval writes.
-2. **Live recall wiring** — a hook/skill so surfaced facts come from semantic recall in real sessions (unbuilt increment-1 item; the user's actual pain).
+2. ✅ **Live recall wiring** — `engram hook` (UserPromptSubmit): reads the hook JSON, semantic-recalls the prompt against the store, prints top-k L2 to stdout (harness adds it to context); abstention floor keeps irrelevant prompts silent; slash-commands/short prompts skipped; **any failure exits 0 silently** (a hook must never block the prompt). ~1s latency. Registered locally via `.claude/settings.local.json` (gitignored — carries a user-specific store path); generic registration:
+   ```json
+   {"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
+     "command": "uv run --project \"$CLAUDE_PROJECT_DIR\" engram hook --dir <memory-dir>"}]}]}}
+   ```
+   Hooks snapshot at session start — activates on the next session.
 3. ✅ **`mem_curate` bench** (`bench_curate.py`) — measures adjudication in isolation (mechanics are unit-tested): fixture store → recall evidence per candidate → one `claude -p` change-set → score vs labels. 100/100/0 × 3 on the clean-case set. Next for the auto-gate: a **harder** candidate set (boundary cases, confusables) to get variance worth calibrating (μ−Zσ).
 4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.
 

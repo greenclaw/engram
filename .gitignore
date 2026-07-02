@@ -6,3 +6,4 @@ index.db
 .engram/
 .venv/
 .claude/sessions/
+.claude/settings.local.json
