@@ -70,9 +70,11 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Still untested quality dims (next):** confusables/precision, negation, cross-lingual matrix, exact-keyword regression, scale (>100 notes).
 
+**Known gap (found in skill baseline testing):** recall does not downweight/filter notes whose frontmatter carries `invalidated_by:` — a superseded note still surfaces alongside its replacement. Fix in `store.py` scoring (penalize or drop invalidated notes; keep them greppable in files).
+
 ## Build plan — next
 
-1. **`/engram-curate` skill** — Claude gathers candidate facts → `engram recall` per candidate → adjudicates op + relation (compatible|contradictory|subsumes|subsumed) → emits a change-set → `engram curate apply`. This is what makes the curator actually Claude-driven.
+1. ✅ **`/engram-curate` skill** (`.claude/skills/engram-curate/`) — built TDD-style against a live RED baseline (agent without the skill self-approved the gate via `--yes` and edited MEMORY.md directly; with the skill it stops at the gate). The CLI gate is agent-safe: non-interactive `curate apply` prints the diff and applies nothing — only an explicit `--yes` after user approval writes.
 2. **Live recall wiring** — a hook/skill so surfaced facts come from semantic recall in real sessions (unbuilt increment-1 item; the user's actual pain).
 3. **`mem_curate` bench** — op-precision + contradiction-catch on a labelled candidate set (claude-bench transcript harness, `~/projects/claude-bench`); later calibrate the gate threshold (μ−Zσ) to activate the auto-gate.
 4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.

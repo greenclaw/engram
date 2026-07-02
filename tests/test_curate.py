@@ -154,6 +154,21 @@ def test_commit_does_not_sweep_prestaged_files(tmp_path):
     assert "unrelated.txt" in status  # still staged, untouched
 
 
+def test_cli_gate_non_interactive_shows_diff_but_does_not_apply(tmp_path, capsys):
+    # agents run the CLI with no TTY: the gate must reject (diff shown, nothing written), not crash
+    from engram.cli import main
+
+    mem = tmp_path / "m"
+    mem.mkdir()
+    cs = tmp_path / "cs.json"
+    cs.write_text(json.dumps({"changes": [{"op": "ADD", "name": "n", "description": "d", "body": "b"}]}))
+    rc = main(["curate", "apply", str(cs), "--dir", str(mem)])  # pytest stdin is closed → EOF
+    assert rc == 0
+    assert not (mem / "n.md").exists()
+    out = capsys.readouterr().out
+    assert "--yes" in out  # tells the reviewer how to actually apply
+
+
 def test_load_changeset(tmp_path):
     f = tmp_path / "cs.json"
     f.write_text(json.dumps({"changes": [{"op": "NOOP"}]}))

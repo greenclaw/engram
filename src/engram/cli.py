@@ -52,7 +52,13 @@ def main(argv=None) -> int:
 
         def confirm(diff):
             print(diff or "(no textual diff)")
-            return args.yes or input("apply these changes? [y/N] ").strip().lower() in ("y", "yes")
+            if args.yes:
+                return True
+            try:
+                return input("apply these changes? [y/N] ").strip().lower() in ("y", "yes")
+            except (EOFError, OSError):  # non-interactive (agent-run): show diff, apply only via --yes
+                print("non-interactive: nothing applied — review the diff above, re-run with --yes to apply")
+                return False
 
         print("applied" if apply(args.dir, cs, confirm=confirm) else "no changes applied")
     return 0
