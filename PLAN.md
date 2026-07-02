@@ -51,8 +51,16 @@ paraphrase set (`bench_recall.py` / `tests/test_eval.py`). Built as `embed.py`+`
 retrieval hit-rate measured directly (needs no LLM) rather than via claude-bench's transcript harness.
 Scoring uses a Generative-Agents weighted **sum** with **min-max-normalized** components — a literal
 product, and un-normalized raw cosine, both let note-type/recency drown query relevance (the bench caught it).
+**Validity caveats:** the set is constructed for ~zero lexical overlap (existence proof of the semantic
+gap fix, NOT an effect size on realistic queries); n=12; end-to-end effect on assistant answers (the
+original claude-bench framing) and the live recall hook/wiring are still unvalidated/unbuilt.
 
 ## Increment 2 — curator (b)  [THE NOVEL PART]
+**Status (2026-07-02):** deterministic core ✅ (`curate.py`: change-set → diff → human gate → pathspec-only
+git commit; path-contained; UPDATE preserves frontmatter; INVALIDATE keeps the note). Scope cut for v1
+(manual-first, a strict prefix of the auto path): pending-store + Stop-hook deferred to fast-follow.
+**The LLM adjudication (skill) + `mem_curate` bench are NOT built — the novel claim is unvalidated until
+they land.**
 **Build:**
 - `curate.py` — input = candidate facts (from a session transcript / `/retro`). For each:
   1. recall top-k similar existing notes (reuse (a)).

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**engram** — a curated, git-native, plain-text **agent memory system** for Claude Code. **Increment 1 (service-less semantic recall) is built + validated** (2026-07-01); increment 2 (the curator) is next. See `PLAN.md`.
+**engram** — a curated, git-native, plain-text **agent memory system** for Claude Code. **Increment 1 (service-less semantic recall) is built + validated** (2026-07-01, with caveats — see PLAN). **Increment 2's deterministic core (`curate apply`) is built** (2026-07-02); the novel half — the LLM-adjudication skill + `mem_curate` bench — is not, so the curator thesis is unvalidated yet. See `PLAN.md`.
 
 The thesis (novelty is an *integration* gap, not a research gap): fuse four ingredients that each exist separately but that **no single system combines** —
 1. a git-markdown Zettelkasten as **source of truth** (`memory/*.md` + `MEMORY.md` index + `[[links]]`),
@@ -51,6 +51,7 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 - `uv run pytest -q` — full suite (`test_core` pure logic; `test_recall`/`test_eval` load the real bge-m3 and **skip** if it's not in the local HF cache).
 - `uv run pytest tests/test_core.py -q` — fast pure-logic tests only (no model).
 - `uv run engram index --dir <memory/>` then `uv run engram recall "<query>" --dir <memory/> -k 5` — the CLI.
+- `uv run engram curate apply <changeset.json|-> --dir <memory/>` — validate a change-set → show diff → human gate → git commit. `--yes` skips the prompt (**live today** — a deliberate gate-bypass for scripting; the calibrated auto-gate will formalize it).
 - `uv run python bench_recall.py` — the increment-1 done-when A/B (semantic vs lexical hit-rate over `tests/fixtures/recall_dataset.json`).
 
 Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_only` (never downloads). Override the repo with `ENGRAM_EMBED_REPO`.
@@ -61,6 +62,7 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 - `core.py` — note parsing (frontmatter+body, handles `type:` and nested `metadata.type`) + scoring. **Score is a Generative-Agents weighted sum, not a literal product** (a product zeroes an old-but-critical fact); weights = the L1 auto-tune knobs (`RESEARCH.md` §6).
 - `store.py` — build `.engram/index.npy` + `meta.json` (rebuildable secondary), recall = one matmul → **min-max-normalized** relevance × importance × recency. Normalization matters: raw cosine is compressed (~0.4–0.7), so without it importance/recency drown query match (the bench caught this). **Discovery is recursive** (rglob, skips MEMORY.md at any level + `.engram/`); **recall auto-rebuilds** when the source drifts (note added/edited/deleted, via count + mtime).
 - `cli.py`, `eval.py` (the A/B instrument).
+- `curate.py` (increment-2 core) — applies a Claude-produced change-set (ADD/UPDATE/INVALIDATE/NOOP) behind a human gate: unified diff → confirm → write + **pathspec-only** git commit (never sweeps the user's staged files). **Change-sets are untrusted LLM output**: paths are contained to the memory dir, required fields / duplicate targets / unknown ops fail loud (`CurateError`). UPDATE preserves untouched frontmatter; INVALIDATE sets `invalidated_by` and keeps the note.
 
 **Robustness policy:** bad notes **fail loud** — `core.MemoryNoteError` names the offending file (invalid YAML, or non-numeric `importance`); one corrupt note aborts the index rather than being silently skipped (curated data must surface).
 
@@ -70,9 +72,12 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 ## Build plan — next
 
-**Increment 2 — curator (the novel part):** `curate.py` (candidate facts → recall top-k neighbors → LLM adjudicates op + classifies pair compatible|contradictory|subsumes|subsumed → emit unified git diff → gate → commit). Validate with `claude-bench` `mem_curate`: op-precision on a *labelled* candidate set + contradiction-catch; calibrate the gate threshold like `calibrate_gate.py` (μ−Zσ over N verifier votes).
+1. **`/engram-curate` skill** — Claude gathers candidate facts → `engram recall` per candidate → adjudicates op + relation (compatible|contradictory|subsumes|subsumed) → emits a change-set → `engram curate apply`. This is what makes the curator actually Claude-driven.
+2. **Live recall wiring** — a hook/skill so surfaced facts come from semantic recall in real sessions (unbuilt increment-1 item; the user's actual pain).
+3. **`mem_curate` bench** — op-precision + contradiction-catch on a labelled candidate set (claude-bench transcript harness, `~/projects/claude-bench`); later calibrate the gate threshold (μ−Zσ) to activate the auto-gate.
+4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.
 
-Increment-1 validation (done): `mem_recall` A/B measured directly (retrieval hit-rate needs no LLM) — semantic **100%@5** vs lexical **0%@5** on the labelled paraphrase set. claude-bench's transcript harness (`~/projects/claude-bench`) is the right tool for the curator/gate work above.
+Increment-1 validation (done): `mem_recall` A/B measured directly — semantic **100%@5** vs lexical **0%@5** on the labelled paraphrase set. *Existence proof, not effect size: the set is built for ~zero lexical overlap; exact-keyword regression/confusables/scale untested; end-to-end effect on assistant answers unmeasured.*
 
 ## Non-goals (v1)
 

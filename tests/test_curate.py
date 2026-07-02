@@ -93,6 +93,67 @@ def test_apply_commits_in_git_repo(tmp_path):
     assert "engram" in log and (mem / "a.md").exists()
 
 
+def test_path_escape_fails_loud(tmp_path):
+    # change-sets are LLM output = untrusted input; names/targets must stay inside the memory dir
+    mem = tmp_path / "m"
+    mem.mkdir()
+    (tmp_path / "outside").mkdir()
+    with pytest.raises(CurateError):
+        apply(mem, {"changes": [{"op": "ADD", "name": "../outside/evil", "description": "x"}]}, confirm=YES)
+    with pytest.raises(CurateError):
+        apply(mem, {"changes": [{"op": "UPDATE", "target": "../escape", "description": "x"}]}, confirm=YES)
+    assert not (tmp_path / "outside" / "evil.md").exists()
+
+
+def test_add_into_subdir_is_allowed(tmp_path):
+    # legit: notes live in subdirs (learnings/) — recursive discovery supports them
+    mem = tmp_path / "m"
+    mem.mkdir()
+    assert apply(mem, {"changes": [{"op": "ADD", "name": "learnings/tip", "description": "d", "body": "b"}]}, confirm=YES)
+    assert (mem / "learnings" / "tip.md").exists()
+
+
+def test_duplicate_target_fails_loud(tmp_path):
+    # two ops on one note are both computed against the original text — last write would silently win
+    mem = tmp_path / "m"
+    _note(mem, "fact")
+    with pytest.raises(CurateError):
+        apply(mem, {"changes": [
+            {"op": "UPDATE", "target": "fact", "description": "v2"},
+            {"op": "INVALIDATE", "target": "fact", "invalidated_by": "newer"},
+        ]}, confirm=YES)
+
+
+def test_missing_required_field_raises_curate_error(tmp_path):
+    mem = tmp_path / "m"
+    mem.mkdir()
+    with pytest.raises(CurateError) as ei:
+        apply(mem, {"changes": [{"op": "ADD", "description": "no name"}]}, confirm=YES)
+    assert "name" in str(ei.value)
+    with pytest.raises(CurateError):
+        apply(mem, {"changes": [{"op": "INVALIDATE", "target": "x"}]}, confirm=YES)  # no invalidated_by
+
+
+def test_commit_does_not_sweep_prestaged_files(tmp_path):
+    repo = tmp_path / "repo"
+    mem = repo / "memory"
+    mem.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    (repo / "unrelated.txt").write_text("wip")
+    subprocess.run(["git", "-C", str(repo), "add", "unrelated.txt"], check=True)  # user had this staged
+
+    apply(mem, {"changes": [{"op": "ADD", "name": "note1", "description": "d", "body": "b"}]}, confirm=YES)
+
+    shown = subprocess.run(["git", "-C", str(repo), "show", "--name-only", "--format=", "HEAD"],
+                           capture_output=True, text=True).stdout
+    assert "note1.md" in shown
+    assert "unrelated.txt" not in shown  # engram must not sweep the user's staged work
+    status = subprocess.run(["git", "-C", str(repo), "status", "--short"], capture_output=True, text=True).stdout
+    assert "unrelated.txt" in status  # still staged, untouched
+
+
 def test_load_changeset(tmp_path):
     f = tmp_path / "cs.json"
     f.write_text(json.dumps({"changes": [{"op": "NOOP"}]}))

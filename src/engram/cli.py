@@ -54,7 +54,7 @@ def main(argv=None) -> int:
             print(diff or "(no textual diff)")
             return args.yes or input("apply these changes? [y/N] ").strip().lower() in ("y", "yes")
 
-        print("committed" if apply(args.dir, cs, confirm=confirm) else "no changes applied")
+        print("applied" if apply(args.dir, cs, confirm=confirm) else "no changes applied")
     return 0
 
 

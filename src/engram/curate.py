@@ -35,22 +35,36 @@ def _serialize(meta: dict, body: str) -> str:
     return f"---\n{front}---\n{body}" + ("" if body.endswith("\n") else "\n")
 
 
+def _require(ch: dict, field: str) -> str:
+    if field not in ch:
+        raise CurateError(f"{ch.get('op', '?')}: missing required field {field!r}")
+    return ch[field]
+
+
+def _note_path(mem_dir: Path, name: str, op: str) -> Path:
+    """Change-sets are LLM output — untrusted. Subdir notes are fine; escaping the store is not."""
+    path = (mem_dir / f"{name}.md").resolve()
+    if not path.is_relative_to(mem_dir.resolve()):
+        raise CurateError(f"{op} {name}: path escapes the memory dir")
+    return path
+
+
 def _edit_for(mem_dir: Path, ch: dict, today: date):
     """Return (path, new_text) for a change, or None for NOOP."""
     op = ch.get("op")
     if op == "NOOP":
         return None
     if op == "ADD":
-        name = ch["name"]
-        path = mem_dir / f"{name}.md"
+        name = _require(ch, "name")
+        path = _note_path(mem_dir, name, op)
         if path.exists():
             raise CurateError(f"ADD {name}: note already exists (use UPDATE)")
         meta = {"name": name, "description": ch.get("description", ""),
                 "type": ch.get("type", "reference"), "updated": today}
         return path, _serialize(meta, ch.get("body", ""))
     if op in ("UPDATE", "INVALIDATE"):
-        target = ch["target"]
-        path = mem_dir / f"{target}.md"
+        target = _require(ch, "target")
+        path = _note_path(mem_dir, target, op)
         if not path.exists():
             raise CurateError(f"{op} {target}: no such note")
         meta, body = core._split_frontmatter(path.read_text(encoding="utf-8"), path)
@@ -61,7 +75,7 @@ def _edit_for(mem_dir: Path, ch: dict, today: date):
             if "body" in ch:
                 body = ch["body"]
         else:  # INVALIDATE — keep the note + body, mark superseded (Zep: invalidate-don't-delete)
-            meta["invalidated_by"] = ch["invalidated_by"]
+            meta["invalidated_by"] = _require(ch, "invalidated_by")
         return path, _serialize(meta, body)
     raise CurateError(f"unknown op {op!r}")
 
@@ -84,7 +98,9 @@ def _commit(mem_dir: Path, paths, changeset: dict) -> None:
         return
     subprocess.run(["git", "-C", str(mem_dir), "add", *[str(p) for p in paths]], check=True)
     ops = ", ".join(sorted({c.get("op") for c in changeset["changes"] if c.get("op") != "NOOP"}))
-    subprocess.run(["git", "-C", str(mem_dir), "commit", "-q", "-m", f"engram: curate ({ops})"], check=True)
+    # explicit pathspec: commit ONLY the curated notes, never sweep the user's pre-staged files
+    subprocess.run(["git", "-C", str(mem_dir), "commit", "-q", "-m", f"engram: curate ({ops})",
+                    "--", *[str(p) for p in paths]], check=True)
 
 
 def apply(mem_dir, changeset: dict, confirm, now: date | None = None) -> bool:
@@ -92,11 +108,15 @@ def apply(mem_dir, changeset: dict, confirm, now: date | None = None) -> bool:
     mem_dir = Path(mem_dir)
     today = now or date.today()
     edits = []
+    seen: set[Path] = set()
     for ch in changeset["changes"]:
         e = _edit_for(mem_dir, ch, today)
         if e is None:
             continue
         path, new = e
+        if path in seen:  # edits are computed against the original text — a second op would silently win
+            raise CurateError(f"multiple ops target {path.name}; merge them into one change")
+        seen.add(path)
         old = path.read_text(encoding="utf-8") if path.exists() else ""
         edits.append((path, new, old))
     if not edits:
@@ -104,6 +124,7 @@ def apply(mem_dir, changeset: dict, confirm, now: date | None = None) -> bool:
     if not confirm(_diff(edits, mem_dir)):
         return False
     for path, new, _ in edits:
+        path.parent.mkdir(parents=True, exist_ok=True)  # subdir notes (learnings/...)
         path.write_text(new, encoding="utf-8")
     _commit(mem_dir, [p for p, _, _ in edits], changeset)
     return True
