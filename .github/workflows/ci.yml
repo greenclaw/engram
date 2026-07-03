@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      # Non-model tests run here (pure logic + curate + hardening). Semantic/adjudication tests
+      # are skipif-model_available and need a cached bge-m3 — local-only until CI caches the model.
+      - run: uv run pytest -q

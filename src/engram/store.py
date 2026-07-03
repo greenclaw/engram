@@ -23,7 +23,15 @@ BODY_HEAD = 500  # chars of body embedded alongside the description
 # a confidently-wrong top hit. Conservative by design — bge-m3's relevant/irrelevant cosine bands
 # overlap (~0.37–0.45), and false abstention (hiding a real memory) is worse than a weak match, so the
 # default sits safely below observed real-hit cosines. A bench-calibrated knob (RESEARCH.md §6).
-RELEVANCE_FLOOR = float(os.environ.get("ENGRAM_RELEVANCE_FLOOR", "0.35"))
+DEFAULT_FLOOR = "0.35"
+
+
+def _env_floor() -> float:
+    raw = os.environ.get("ENGRAM_RELEVANCE_FLOOR", DEFAULT_FLOOR)  # read at use, not frozen at import
+    try:
+        return float(raw)
+    except ValueError as e:
+        raise ValueError(f"ENGRAM_RELEVANCE_FLOOR must be a number, got {raw!r}") from e
 
 
 @dataclass
@@ -55,22 +63,29 @@ def _embed_text(note) -> str:
     return f"{note.name}. {note.description}\n{note.body[:BODY_HEAD]}".strip()
 
 
+def _atomic_write(path: Path, write) -> None:
+    """Write via a temp file + os.replace so a concurrent reader never sees a torn/half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        write(f)
+    os.replace(tmp, path)
+
+
 def build_index(mem_dir) -> int:
-    """(Re)build the index over `mem_dir`. Returns note count. ponytail: full rebuild, no incremental
-    — add mtime-skip only when a few hundred notes becomes a few thousand."""
+    """(Re)build the index over `mem_dir` (full rebuild, atomic writes). Raises if the dir is missing."""
     mem_dir = Path(mem_dir)
+    if not mem_dir.is_dir():  # a typo'd --dir must error, not auto-create an empty ghost store
+        raise FileNotFoundError(f"memory dir does not exist: {mem_dir}")
     notes = [parse_note(p) for p in _iter_notes(mem_dir)]
     d, npy, metaf = _paths(mem_dir)
     d.mkdir(parents=True, exist_ok=True)
 
-    if notes:
-        vecs = Embedder().encode([_embed_text(n) for n in notes])
-    else:
-        vecs = np.zeros((0, 1024), dtype=np.float32)
+    vecs = Embedder().encode([_embed_text(n) for n in notes]) if notes else np.zeros((0, 1024), dtype=np.float32)
 
     meta = []
     for n in notes:
-        updated = n.updated or date.fromtimestamp(n.path.stat().st_mtime)
+        st = n.path.stat()
+        updated = n.updated or date.fromtimestamp(st.st_mtime)
         meta.append({
             "path": str(n.path),
             "name": n.name,
@@ -79,9 +94,11 @@ def build_index(mem_dir) -> int:
             "importance": note_importance(n),
             "updated": updated.isoformat(),
             "invalidated": bool(n.invalidated_by),
+            "mtime_ns": st.st_mtime_ns,
+            "size": st.st_size,
         })
-    np.save(npy, vecs)
-    metaf.write_text(json.dumps(meta, ensure_ascii=False, indent=0))
+    _atomic_write(npy, lambda f: np.save(f, vecs))
+    _atomic_write(metaf, lambda f: f.write(json.dumps(meta, ensure_ascii=False, indent=0).encode("utf-8")))
     return len(notes)
 
 
@@ -92,20 +109,26 @@ def _load(mem_dir: Path):
     return np.load(npy), json.loads(metaf.read_text())
 
 
+def _fingerprint(mem_dir: Path) -> dict:
+    fp = {}
+    for p in _iter_notes(mem_dir):
+        st = p.stat()
+        fp[str(p)] = [st.st_mtime_ns, st.st_size]
+    return fp
+
+
 def _is_stale(mem_dir: Path) -> bool:
-    """The index is a rebuildable secondary; detect when the markdown source has drifted from it."""
+    """Rebuild when the source drifts. Compares each note's (mtime_ns, size) to the index, so adds,
+    deletes, edits AND renames (which preserve count + mtime, missed by an mtime>index check) all catch."""
     _, npy, metaf = _paths(mem_dir)
     if not npy.exists() or not metaf.exists():
         return True
     try:
-        meta_count = len(json.loads(metaf.read_text()))
+        meta = json.loads(metaf.read_text())
     except (ValueError, OSError):
         return True
-    notes = list(_iter_notes(mem_dir))
-    if len(notes) != meta_count:  # a note was added or deleted
-        return True
-    idx_mtime = npy.stat().st_mtime
-    return any(p.stat().st_mtime > idx_mtime for p in notes)  # a note was edited
+    recorded = {m["path"]: [m.get("mtime_ns"), m.get("size")] for m in meta}
+    return recorded != _fingerprint(mem_dir)
 
 
 def recall(mem_dir, query: str, k: int = 5, now: date | None = None, floor: float | None = None) -> list[Hit]:
@@ -113,10 +136,10 @@ def recall(mem_dir, query: str, k: int = 5, now: date | None = None, floor: floa
     Auto-rebuilds the index first if the markdown source has drifted (added/edited/deleted notes).
     Abstains (drops hits below `floor` raw cosine) so an unrelated query returns [] not a wrong hit."""
     now = now or date.today()
-    floor = RELEVANCE_FLOOR if floor is None else floor
+    floor = _env_floor() if floor is None else floor
     mem_dir = Path(mem_dir)
     if _is_stale(mem_dir):
-        build_index(mem_dir)
+        build_index(mem_dir)  # raises FileNotFoundError on a nonexistent dir — no ghost store
     mat, meta = _load(mem_dir)
     if not meta:
         return []

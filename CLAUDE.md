@@ -74,15 +74,15 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Invalidation is now honored on read:** build_index records `invalidated: bool` and recall skips notes carrying `invalidated_by:` (they stay in the files, greppable; INVALIDATE no longer refreshes their recency).
 
-## Open review findings (PR #1, deferred — not yet fixed)
+## Review findings status (PR #1)
 
-The top-cluster (injection, enclosing-repo commit, invalidate-no-effect, frontmatter corruption, commit-after-write, untrusted-input, nested/MEMORY targets, yaml coercion, UPDATE dropped fields) is **fixed** (`test_hardening.py`). Still open, ranked:
-- **Staleness misses rename + edit-during-build** — `_is_stale` (count + `mtime > index`) doesn't catch `mv a.md b.md` or an edit landing before `np.save`; recall serves a dead path / stale vector. Needs a content hash or dir-mtime check.
-- **encode() OOM at scale** — one padded ONNX batch over a few-hundred-note store can hit multi-GB; chunk `encode()` into batches of ~16.
-- **Concurrency** — two sessions' hooks can race `build_index` (non-atomic `.npy`+`meta.json` write, no lock) → torn read + double model load. Tmp-write+rename + a lock.
-- **TOCTOU at the gate** — an external edit while the gate prompt is open is clobbered; re-read + compare before write.
-- **CI-blind tests** — all semantic tests `skipif not model_available()` (swallows all errors); no CI pins an env where they run.
-- Lower: ghost-store on a typo'd `--dir` (recall auto-creates an empty store); min-max amplification in tiny stores; stdin `-` can't approve interactively; `--yes` bypasses the "prose stays human-gated" convention (unenforced) + stale `--help`; SKILL.md step-7 edits MEMORY.md outside the gate (vs README invariant); SKILL.md `type` enum omits `gotcha`/`decision`; `bench_curate` greedy regex + KeyError; env knobs read at import; hook registration `exit 2` blocks prompts in a non-engram project.
+Top-cluster + batch-2 are **fixed** (`test_hardening.py`, `test_hardening2.py`): injection, enclosing-repo commit, invalidate-no-effect, frontmatter corruption, commit-after-write, untrusted-input, nested/MEMORY targets, yaml coercion, dropped UPDATE fields; plus rename-staleness ((mtime_ns,size) fingerprint), encode chunking, atomic index writes, TOCTOU gate re-read, ghost-store guard, `/dev/tty` gate, env-read-at-use, robust bench JSON, SKILL enum/step-7, `--yes`/`--help` wording, hook-registration docs.
+
+Still open (accepted / follow-up):
+- **Concurrency double model-load** — atomic writes fixed torn reads; two simultaneous first-prompt rebuilds can still each load the model (rare memory spike). A file lock would serialize.
+- **Edit-during-rebuild race** — a note edited *during* the multi-second embed (mtime lands before `np.save`) can be missed until its next change; rename + after-build edits are caught.
+- **min-max amplification in tiny stores** — a noise-level cosine gap can invert ranking when the tied pair are the store's global min/max; self-corrects as the store grows (documented tradeoff).
+- **CI semantic coverage** — CI (`.github/workflows/ci.yml`) runs the non-model suite; semantic/curate-adjudication tests need a cached bge-m3 and only run locally (CI model-caching is a follow-up).
 
 ## Build plan — next
 
@@ -90,9 +90,9 @@ The top-cluster (injection, enclosing-repo commit, invalidate-no-effect, frontma
 2. ✅ **Live recall wiring** — `engram hook` (UserPromptSubmit): reads the hook JSON, semantic-recalls the prompt against the store, prints top-k L2 to stdout (harness adds it to context); abstention floor keeps irrelevant prompts silent; slash-commands/short prompts skipped; **any failure exits 0 silently** (a hook must never block the prompt). ~1s latency. Registered locally via `.claude/settings.local.json` (gitignored — carries a user-specific store path); generic registration:
    ```json
    {"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
-     "command": "uv run --project \"$CLAUDE_PROJECT_DIR\" engram hook --dir <memory-dir>"}]}]}}
+     "command": "uv run --project /abs/path/to/engram engram hook --dir <memory-dir>"}]}]}}
    ```
-   Hooks snapshot at session start — activates on the next session.
+   Use an **absolute** `--project` (or `uv tool install` engram and call bare `engram hook`) — not `$CLAUDE_PROJECT_DIR`: in a non-engram project `uv` fails to find the command and exits non-zero, and a non-zero UserPromptSubmit hook blocks the prompt. Hooks snapshot at session start — activates on the next session.
 3. ✅ **`mem_curate` bench** (`bench_curate.py`) — measures adjudication in isolation (mechanics are unit-tested): fixture store → recall evidence per candidate → one `claude -p` change-set → score vs labels. 100/100/0 × 3 on the clean-case set. Next for the auto-gate: a **harder** candidate set (boundary cases, confusables) to get variance worth calibrating (μ−Zσ).
 4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.
 

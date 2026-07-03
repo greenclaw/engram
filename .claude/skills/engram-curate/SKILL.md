@@ -39,11 +39,11 @@ There is no DELETE. Superseded ≠ removed: `INVALIDATE` keeps the note and mark
 ]}
 ```
 
-`type` ∈ user|feedback|project|reference. UPDATE carries only the fields you change; untouched frontmatter survives.
+`type` ∈ user|feedback|gotcha|decision|project|reference (gotcha and feedback score highest importance). UPDATE carries only the fields you change; untouched frontmatter survives.
 
 5. `uv run engram curate apply <cs.json> --dir <store>` — non-interactive it prints the diff and applies nothing.
 6. Show the user that diff verbatim and ask for approval. Approved → re-run with `--yes` (writes + provenance commit). Rejected or amended → revise the change-set and return to step 5.
-7. After an approved apply: sync the affected `MEMORY.md` index lines (one-liner per fact; show this edit too), commit it, then `uv run engram index --dir <store>`.
+7. After an approved apply: propose the affected `MEMORY.md` index-line edits (one-liner per fact) — **show them and get the same explicit approval as step 6 before writing**, then commit `MEMORY.md` and run `uv run engram index --dir <store>`. The index is the one store file engram doesn't manage; it still gets a gate.
 
 ## Red flags — stop and hand the gate back
 

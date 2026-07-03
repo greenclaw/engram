@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import tempfile
@@ -76,15 +75,33 @@ def build_prompt(dataset: dict, mem_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def _extract_changes(text: str) -> list:
+    """Pull the change-set out of a model reply, tolerating prose/fences around it. A greedy `\\{.*\\}`
+    spans stray prose braces; instead scan for the first balanced {...} that parses and has 'changes'."""
+    depth = start = 0
+    for i, c in enumerate(text):
+        if c == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict) and isinstance(obj.get("changes"), list):
+                    return obj["changes"]
+    raise ValueError(f"no JSON object with a 'changes' list in reply: {text[:200]!r}")
+
+
 def ask_claude(prompt: str, model: str | None) -> list[dict]:
     cmd = ["claude", "-p", prompt]
     if model:
         cmd += ["--model", model]
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=600).stdout
-    m = re.search(r"\{.*\}", out, re.DOTALL)  # tolerate stray prose/fences around the JSON
-    if not m:
-        raise ValueError(f"no JSON in model reply: {out[:200]!r}")
-    return json.loads(m.group(0))["changes"]
+    return _extract_changes(out)
 
 
 def main() -> None:
