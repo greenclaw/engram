@@ -24,7 +24,10 @@ class CurateError(Exception):
 
 def load_changeset(source: str) -> dict:
     text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
-    cs = json.loads(text)
+    try:
+        cs = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise CurateError(f"invalid change-set JSON: {e}") from e
     if not isinstance(cs, dict) or not isinstance(cs.get("changes"), list):
         raise CurateError("change-set must be an object with a 'changes' list")
     return cs
@@ -43,14 +46,39 @@ def _require(ch: dict, field: str) -> str:
 
 def _note_path(mem_dir: Path, name: str, op: str) -> Path:
     """Change-sets are LLM output — untrusted. Subdir notes are fine; escaping the store is not."""
+    if not isinstance(name, str):
+        raise CurateError(f"{op}: 'name' must be a string, got {type(name).__name__}")
     path = (mem_dir / f"{name}.md").resolve()
     if not path.is_relative_to(mem_dir.resolve()):
         raise CurateError(f"{op} {name}: path escapes the memory dir")
+    if path.name == core.INDEX_FILE:
+        raise CurateError(f"{op} {name}: refusing to write the {core.INDEX_FILE} index as a note")
     return path
 
 
-def _edit_for(mem_dir: Path, ch: dict, today: date):
+def _resolve_target(mem_dir: Path, target: str, op: str) -> Path:
+    """UPDATE/INVALIDATE reference a note by its recall id (frontmatter name), which may not match the
+    filename for nested notes. Look it up; the index (MEMORY.md) is never a target (not in _iter_notes)."""
+    from engram.store import _iter_notes
+
+    for p in _iter_notes(mem_dir):
+        meta, _ = core._split_frontmatter(p.read_text(encoding="utf-8"), p)
+        rel = str(p.relative_to(mem_dir).with_suffix(""))
+        if target in (str(meta.get("name", p.stem)), p.stem, rel):
+            return p
+    raise CurateError(f"{op} {target}: no such note")
+
+
+def _as_body(body) -> str:
+    if not isinstance(body, str):
+        raise CurateError(f"'body' must be a string, got {type(body).__name__}")
+    return body
+
+
+def _edit_for(mem_dir: Path, ch, today: date):
     """Return (path, new_text) for a change, or None for NOOP."""
+    if not isinstance(ch, dict):
+        raise CurateError(f"each change must be an object, got {type(ch).__name__}")
     op = ch.get("op")
     if op == "NOOP":
         return None
@@ -59,22 +87,23 @@ def _edit_for(mem_dir: Path, ch: dict, today: date):
         path = _note_path(mem_dir, name, op)
         if path.exists():
             raise CurateError(f"ADD {name}: note already exists (use UPDATE)")
-        meta = {"name": name, "description": ch.get("description", ""),
+        meta = {"name": name, "description": str(ch.get("description", "")),
                 "type": ch.get("type", "reference"), "updated": today}
-        return path, _serialize(meta, ch.get("body", ""))
+        return path, _serialize(meta, _as_body(ch.get("body", "")))
     if op in ("UPDATE", "INVALIDATE"):
-        target = _require(ch, "target")
-        path = _note_path(mem_dir, target, op)
-        if not path.exists():
-            raise CurateError(f"{op} {target}: no such note")
+        path = _resolve_target(mem_dir, _require(ch, "target"), op)
         meta, body = core._split_frontmatter(path.read_text(encoding="utf-8"), path)
-        meta["updated"] = today
         if op == "UPDATE":
+            meta["updated"] = today  # content changed → refresh recency
             if "description" in ch:
-                meta["description"] = ch["description"]
+                meta["description"] = str(ch["description"])
+            if "type" in ch:
+                meta["type"] = ch["type"]
+            if "importance" in ch:
+                meta["importance"] = ch["importance"]
             if "body" in ch:
-                body = ch["body"]
-        else:  # INVALIDATE — keep the note + body, mark superseded (Zep: invalidate-don't-delete)
+                body = _as_body(ch["body"])
+        else:  # INVALIDATE — mark superseded, keep note+body, do NOT refresh recency (Zep)
             meta["invalidated_by"] = _require(ch, "invalidated_by")
         return path, _serialize(meta, body)
     raise CurateError(f"unknown op {op!r}")
@@ -91,16 +120,26 @@ def _diff(edits, mem_dir: Path) -> str:
 
 def _commit(mem_dir: Path, paths, changeset: dict) -> None:
     try:
-        subprocess.run(["git", "-C", str(mem_dir), "rev-parse", "--is-inside-work-tree"],
-                       check=True, capture_output=True)
+        top = subprocess.run(["git", "-C", str(mem_dir), "rev-parse", "--show-toplevel"],
+                             check=True, capture_output=True, text=True).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("(not a git repo — files written, no provenance commit)")
         return
-    subprocess.run(["git", "-C", str(mem_dir), "add", *[str(p) for p in paths]], check=True)
-    ops = ", ".join(sorted({c.get("op") for c in changeset["changes"] if c.get("op") != "NOOP"}))
-    # explicit pathspec: commit ONLY the curated notes, never sweep the user's pre-staged files
-    subprocess.run(["git", "-C", str(mem_dir), "commit", "-q", "-m", f"engram: curate ({ops})",
-                    "--", *[str(p) for p in paths]], check=True)
+    # Only commit if the memory dir IS the repo root — never land a curate commit on an enclosing repo's
+    # branch (a memory dir nested inside another project / dotfiles repo).
+    if Path(top).resolve() != Path(mem_dir).resolve():
+        print(f"(memory dir is not its own git repo — nested in {top}; files written, no provenance commit)")
+        return
+    rel = [str(p) for p in paths]
+    ops = ", ".join(sorted({c.get("op") for c in changeset["changes"]
+                            if isinstance(c, dict) and c.get("op") != "NOOP"}))
+    try:  # a git failure (gitignored, nothing-to-commit, hook) must not crash after files were written
+        subprocess.run(["git", "-C", str(mem_dir), "add", *rel], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(mem_dir), "commit", "-q", "-m", f"engram: curate ({ops})", "--", *rel],
+                       check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or b"").decode(errors="replace").strip() or "git error"
+        print(f"(files written; git commit skipped: {detail})")
 
 
 def apply(mem_dir, changeset: dict, confirm, now: date | None = None) -> bool:

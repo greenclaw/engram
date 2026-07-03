@@ -72,7 +72,17 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Still untested quality dims (next):** confusables/precision, negation, cross-lingual matrix, exact-keyword regression, scale (>100 notes).
 
-**Known gap (found in skill baseline testing):** recall does not downweight/filter notes whose frontmatter carries `invalidated_by:` — a superseded note still surfaces alongside its replacement. Fix in `store.py` scoring (penalize or drop invalidated notes; keep them greppable in files).
+**Invalidation is now honored on read:** build_index records `invalidated: bool` and recall skips notes carrying `invalidated_by:` (they stay in the files, greppable; INVALIDATE no longer refreshes their recency).
+
+## Open review findings (PR #1, deferred — not yet fixed)
+
+The top-cluster (injection, enclosing-repo commit, invalidate-no-effect, frontmatter corruption, commit-after-write, untrusted-input, nested/MEMORY targets, yaml coercion, UPDATE dropped fields) is **fixed** (`test_hardening.py`). Still open, ranked:
+- **Staleness misses rename + edit-during-build** — `_is_stale` (count + `mtime > index`) doesn't catch `mv a.md b.md` or an edit landing before `np.save`; recall serves a dead path / stale vector. Needs a content hash or dir-mtime check.
+- **encode() OOM at scale** — one padded ONNX batch over a few-hundred-note store can hit multi-GB; chunk `encode()` into batches of ~16.
+- **Concurrency** — two sessions' hooks can race `build_index` (non-atomic `.npy`+`meta.json` write, no lock) → torn read + double model load. Tmp-write+rename + a lock.
+- **TOCTOU at the gate** — an external edit while the gate prompt is open is clobbered; re-read + compare before write.
+- **CI-blind tests** — all semantic tests `skipif not model_available()` (swallows all errors); no CI pins an env where they run.
+- Lower: ghost-store on a typo'd `--dir` (recall auto-creates an empty store); min-max amplification in tiny stores; stdin `-` can't approve interactively; `--yes` bypasses the "prose stays human-gated" convention (unenforced) + stale `--help`; SKILL.md step-7 edits MEMORY.md outside the gate (vs README invariant); SKILL.md `type` enum omits `gotcha`/`decision`; `bench_curate` greedy regex + KeyError; env knobs read at import; hook registration `exit 2` blocks prompts in a non-engram project.
 
 ## Build plan — next
 

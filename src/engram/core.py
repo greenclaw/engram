@@ -5,11 +5,15 @@ Pure logic, no model. The embedder lives in embed.py so this stays fast to impor
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 import yaml
+
+INDEX_FILE = "MEMORY.md"  # the L1 index — a note store's one non-note file
+_FRONTMATTER = re.compile(r"\A---\n(.*?)\n---[ \t]*\n?(.*)\Z", re.DOTALL)
 
 # Weighted SUM, not product. PLAN.md's shorthand said "recency×importance×relevance", but a pure
 # product zeroes an old-but-critical fact ("we use Coolify not Vercel" doesn't decay). Generative
@@ -44,6 +48,7 @@ class Note:
     body: str
     importance: float | None = None  # explicit frontmatter override
     updated: date | None = None      # explicit frontmatter date; index falls back to mtime
+    invalidated_by: str | None = None  # set by a curator INVALIDATE; suppresses the note from recall
 
 
 def default_importance(note_type: str) -> float:
@@ -82,15 +87,19 @@ def _coerce_date(value) -> date | None:
 
 
 def _split_frontmatter(text: str, path: Path) -> tuple[dict, str]:
-    if text.startswith("---"):
-        parts = text.split("---", 2)  # ['', yaml, body]
-        if len(parts) == 3:
-            try:
-                meta = yaml.safe_load(parts[1]) or {}
-            except yaml.YAMLError as e:
-                raise MemoryNoteError(f"{path.name}: invalid YAML frontmatter — {str(e).splitlines()[0]}") from e
-            return (meta if isinstance(meta, dict) else {}), parts[2].lstrip("\n")
-    return {}, text
+    # The closing `---` must be line-anchored (\n---\n), so a '---' inside a frontmatter value can't
+    # truncate it. Frontmatter that parses to a non-dict (e.g. a leading '---' horizontal rule) is NOT
+    # frontmatter — keep the whole text as body rather than silently discarding it.
+    m = _FRONTMATTER.match(text)
+    if not m:
+        return {}, text
+    try:
+        meta = yaml.safe_load(m.group(1))
+    except yaml.YAMLError as e:
+        raise MemoryNoteError(f"{path.name}: invalid YAML frontmatter — {str(e).splitlines()[0]}") from e
+    if not isinstance(meta, dict):
+        return {}, text
+    return meta, m.group(2)
 
 
 def parse_note(path: Path) -> Note:
@@ -105,12 +114,16 @@ def parse_note(path: Path) -> Note:
         except (TypeError, ValueError):
             raise MemoryNoteError(f"{path.name}: 'importance' must be a number 0–1, got {importance!r}") from None
 
+    # str-coerce name/type/description: yaml turns `name: 2026-07-01`→date, `description: no`→False, which
+    # otherwise crash json.dumps in the index or print as 'False' in context.
+    invalidated_by = meta.get("invalidated_by")
     return Note(
         path=path,
-        name=meta.get("name", path.stem),
-        description=meta.get("description", ""),
-        type=note_type,
+        name=str(meta.get("name", path.stem)),
+        description=str(meta.get("description", "")),
+        type=str(note_type),
         body=body,
         importance=importance,
         updated=_coerce_date(meta.get("updated")),
+        invalidated_by=str(invalidated_by) if invalidated_by is not None else None,
     )

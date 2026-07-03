@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from engram.core import note_importance, parse_note, recency_decay, score
+from engram.core import INDEX_FILE, note_importance, parse_note, recency_decay, score
 from engram.embed import Embedder
 
 INDEX_DIR = ".engram"
@@ -46,7 +46,7 @@ def _iter_notes(mem_dir: Path):
     anything under the rebuildable `.engram/` index dir."""
     mem_dir = Path(mem_dir)
     for p in sorted(mem_dir.rglob("*.md")):
-        if p.name == "MEMORY.md" or INDEX_DIR in p.relative_to(mem_dir).parts:
+        if p.name == INDEX_FILE or INDEX_DIR in p.relative_to(mem_dir).parts:
             continue
         yield p
 
@@ -78,6 +78,7 @@ def build_index(mem_dir) -> int:
             "type": n.type,
             "importance": note_importance(n),
             "updated": updated.isoformat(),
+            "invalidated": bool(n.invalidated_by),
         })
     np.save(npy, vecs)
     metaf.write_text(json.dumps(meta, ensure_ascii=False, indent=0))
@@ -133,6 +134,8 @@ def recall(mem_dir, query: str, k: int = 5, now: date | None = None, floor: floa
 
     hits = []
     for i, m in enumerate(meta):
+        if m.get("invalidated"):  # superseded by a curator INVALIDATE — never surface it
+            continue
         rel_norm = (float(cos[i]) - lo) / rng if rng > 1e-9 else 1.0
         rec = recency_decay(date.fromisoformat(m["updated"]), now)
         hits.append(

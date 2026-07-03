@@ -65,14 +65,18 @@ def main(argv=None) -> int:
             if hits:
                 print("engram semantic recall (background context; verify before asserting — read the full note at its path if it matters):")
                 for h in hits:
-                    print(f"- [{h.type}] {h.name} — {h.description} ({h.path})")
+                    # collapse whitespace/newlines: a note's text is untrusted, and a raw newline would
+                    # inject a fake extra hit line into the agent's context (prompt injection via memory).
+                    name = " ".join(str(h.name).split())
+                    desc = " ".join(str(h.description).split())
+                    print(f"- [{h.type}] {name} — {desc} ({h.path})")
         except Exception as e:  # noqa: BLE001
             print(f"engram hook: {e}", file=sys.stderr)
         return 0
     elif args.cmd == "curate":
-        from engram.curate import apply, load_changeset
+        import sys
 
-        cs = load_changeset(args.changeset)
+        from engram.curate import CurateError, apply, load_changeset
 
         def confirm(diff):
             print(diff or "(no textual diff)")
@@ -84,7 +88,12 @@ def main(argv=None) -> int:
                 print("non-interactive: nothing applied — review the diff above, re-run with --yes to apply")
                 return False
 
-        print("applied" if apply(args.dir, cs, confirm=confirm) else "no changes applied")
+        try:  # a bad change-set (untrusted LLM output) is a clean error, not a traceback
+            cs = load_changeset(args.changeset)
+            print("applied" if apply(args.dir, cs, confirm=confirm) else "no changes applied")
+        except CurateError as e:
+            print(f"engram curate: {e}", file=sys.stderr)
+            return 1
     return 0
 
 

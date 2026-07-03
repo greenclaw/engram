@@ -134,23 +134,18 @@ def test_missing_required_field_raises_curate_error(tmp_path):
         apply(mem, {"changes": [{"op": "INVALIDATE", "target": "x"}]}, confirm=YES)  # no invalidated_by
 
 
-def test_commit_does_not_sweep_prestaged_files(tmp_path):
-    repo = tmp_path / "repo"
-    mem = repo / "memory"
-    mem.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
-    (repo / "unrelated.txt").write_text("wip")
-    subprocess.run(["git", "-C", str(repo), "add", "unrelated.txt"], check=True)  # user had this staged
+def test_commit_does_not_sweep_prestaged_files(tmp_path, git_repo):
+    mem = git_repo(tmp_path / "memory")  # the memory dir IS its own repo root
+    (mem / "unrelated.txt").write_text("wip")
+    subprocess.run(["git", "-C", str(mem), "add", "unrelated.txt"], check=True)  # user had this staged
 
     apply(mem, {"changes": [{"op": "ADD", "name": "note1", "description": "d", "body": "b"}]}, confirm=YES)
 
-    shown = subprocess.run(["git", "-C", str(repo), "show", "--name-only", "--format=", "HEAD"],
+    shown = subprocess.run(["git", "-C", str(mem), "show", "--name-only", "--format=", "HEAD"],
                            capture_output=True, text=True).stdout
     assert "note1.md" in shown
     assert "unrelated.txt" not in shown  # engram must not sweep the user's staged work
-    status = subprocess.run(["git", "-C", str(repo), "status", "--short"], capture_output=True, text=True).stdout
+    status = subprocess.run(["git", "-C", str(mem), "status", "--short"], capture_output=True, text=True).stdout
     assert "unrelated.txt" in status  # still staged, untouched
 
 
