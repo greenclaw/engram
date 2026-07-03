@@ -1,4 +1,23 @@
+# python
 __pycache__/
 *.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# engram rebuildable index (markdown is the source of truth)
+.engram/
 *.npy
 index.db
+
+# claude code local state
+.claude/sessions/
+.claude/settings.local.json
+
+# os
+.DS_Store

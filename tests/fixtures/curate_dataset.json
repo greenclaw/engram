@@ -1,0 +1,27 @@
+{
+  "_note": "Labelled candidate set for the mem_curate bench (increment-2 done-when). 12 candidates, 3 per op class. 'op' INVALIDATE implies the paired ADD of the superseding fact.",
+  "notes": [
+    {"name": "hosting", "type": "project", "description": "Production runs on Vercel with automatic git deploys."},
+    {"name": "packages", "type": "feedback", "description": "Use pnpm for JS dependencies, never npm or yarn."},
+    {"name": "python-env", "type": "feedback", "description": "Python projects use uv, never pip."},
+    {"name": "db", "type": "project", "description": "App data lives in SQLite locally."},
+    {"name": "testing", "type": "feedback", "description": "Tests run with pytest."},
+    {"name": "email", "type": "reference", "description": "Transactional email goes through Resend."},
+    {"name": "lint", "type": "feedback", "description": "Code style is enforced by ruff."},
+    {"name": "deploy-freq", "type": "project", "description": "Deploys happen manually on Fridays."}
+  ],
+  "candidates": [
+    {"text": "The design system uses Tailwind v4 tokens for all component styling.", "op": "ADD"},
+    {"text": "Секреты хранятся в OS keyring и достаются через secret CLI, значения никогда не печатаются.", "op": "ADD"},
+    {"text": "Feature flags are read from a local flags.json file at startup.", "op": "ADD"},
+    {"text": "Use pnpm, not npm, when installing JS dependencies.", "op": "NOOP", "target": "packages"},
+    {"text": "We run our test suite with pytest.", "op": "NOOP", "target": "testing"},
+    {"text": "Python dependencies are managed with uv.", "op": "NOOP", "target": "python-env"},
+    {"text": "Tests run with pytest; integration tests additionally require the -m integration marker.", "op": "UPDATE", "target": "testing"},
+    {"text": "Transactional email goes through Resend, specifically the EU region endpoint.", "op": "UPDATE", "target": "email"},
+    {"text": "Deploys happen manually on Fridays, though hotfixes may ship any day.", "op": "UPDATE", "target": "deploy-freq"},
+    {"text": "Production has moved off Vercel — it now runs on Fly.io.", "op": "INVALIDATE", "target": "hosting"},
+    {"text": "The app now stores its data in Postgres; SQLite is no longer used.", "op": "INVALIDATE", "target": "db"},
+    {"text": "We switched from ruff to biome for linting.", "op": "INVALIDATE", "target": "lint"}
+  ]
+}
