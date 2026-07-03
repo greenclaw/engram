@@ -61,18 +61,55 @@ mark the old note `invalidated_by:` and keep it — git and the file both hold h
 
 ## How it works
 
-```
- SoT: memory/*.md  frontmatter{name, description, type, importance, updated, invalidated_by}
-      + MEMORY.md (L1 index)
+Source of truth: `memory/*.md` with frontmatter `{name, description, type, importance, updated,
+invalidated_by}` + a `MEMORY.md` L1 index. Everything else is derived.
 
- READ (service-less)                          WRITE (gated)
-  L1  MEMORY.md one-liners                     candidate facts (session learnings)
-  L2  semantic top-k (id+description) ──────►  recall top-k neighbors per candidate
-      score = minmax(cos) · w_rel              LLM adjudicates: ADD|UPDATE|INVALIDATE|NOOP
-            + importance · w_imp               change-set → unified diff → HUMAN GATE
-            + recency(τ=90d) · w_rec           approve → write + git commit (provenance)
-  L3  read the full note only by choice        reject → nothing happened
+**Read path** — service-less semantic recall, live on every prompt via the hook:
+
+```mermaid
+flowchart LR
+    P([user prompt]) --> H[UserPromptSubmit<br/>hook]
+    H --> R{recall:<br/>cosine ≥ floor?}
+    R -- "no (off-topic)" --> X([silence — nothing injected])
+    R -- yes --> K["top-k L2 hits<br/>score = minmax(cos)·w<sub>rel</sub> + importance·w<sub>imp</sub> + recency·w<sub>rec</sub>"]
+    K --> CTX([hits land in context])
+    CTX -.->|only if it matters| L3[agent reads the full note]
+
+    style X fill:#2d333b,stroke:#768390,color:#adbac7
+    style CTX fill:#1c4428,stroke:#2ea043,color:#adbac7
 ```
+
+**Write path** — the curator proposes, the human gate decides, git remembers:
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant C as Claude<br/>(/engram-curate skill)
+    participant E as engram CLI
+    participant S as memory/*.md (git)
+
+    Note over C: session learnings → candidate facts
+    loop per candidate
+        C->>E: engram recall "candidate"
+        E->>S: read (auto-rebuild index if stale)
+        E-->>C: top-k neighbors (id + description)
+    end
+    Note over C: adjudicate each: ADD / UPDATE /<br/>INVALIDATE / NOOP + relation
+    C->>E: engram curate apply changeset.json
+    E-->>C: unified diff — nothing written
+    C-->>U: diff verbatim + approval request
+    alt approved
+        U->>C: yes
+        C->>E: curate apply --yes
+        E->>S: write notes + git commit (provenance)
+    else rejected / amended
+        U->>C: no
+        Note over S: store untouched
+    end
+```
+
+The invariant both diagrams encode: **the LLM never writes the store** — reads flow through recall,
+writes flow through the gate, and only `engram` (after your explicit yes) touches the files.
 
 - **Scoring** is the Generative-Agents weighted sum with min-max-normalized relevance (raw cosine is
   compressed; without normalization note-type would outrank query match). Weights are tunable knobs.
