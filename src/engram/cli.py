@@ -27,19 +27,32 @@ def main(argv=None) -> int:
     pca = pcs.add_parser("apply", help="validate a change-set, show its diff, gate, commit")
     pca.add_argument("changeset", help="path to change-set JSON, or - for stdin")
     pca.add_argument("--dir", required=True, help="the memory/ dir to apply into")
-    pca.add_argument("--yes", action="store_true", help="skip the prompt (reserved for calibrated auto-gate)")
+    pca.add_argument("--yes", action="store_true",
+                     help="apply without the interactive prompt — bypasses the human gate (for scripting)")
 
     args = p.parse_args(argv)
 
     if args.cmd == "index":
+        import sys
+
         from engram.store import build_index
 
-        n = build_index(args.dir)
+        try:
+            n = build_index(args.dir)
+        except (FileNotFoundError, ValueError) as e:  # missing dir / bad env knob → clean error, not traceback
+            print(f"engram index: {e}", file=sys.stderr)
+            return 1
         print(f"indexed {n} notes → {Path(args.dir) / '.engram'}")
     elif args.cmd == "recall":
+        import sys
+
         from engram.store import recall
 
-        hits = recall(args.dir, args.query, k=args.k)
+        try:
+            hits = recall(args.dir, args.query, k=args.k)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"engram recall: {e}", file=sys.stderr)
+            return 1
         if args.json:
             import json
 
@@ -82,8 +95,15 @@ def main(argv=None) -> int:
             print(diff or "(no textual diff)")
             if args.yes:
                 return True
+            prompt = "apply these changes? [y/N] "
+            try:  # stdin may be a piped change-set ('-') — read the gate answer from the terminal
+                with open("/dev/tty") as tty:
+                    print(prompt, end="", flush=True)
+                    return tty.readline().strip().lower() in ("y", "yes")
+            except OSError:
+                pass
             try:
-                return input("apply these changes? [y/N] ").strip().lower() in ("y", "yes")
+                return input(prompt).strip().lower() in ("y", "yes")
             except (EOFError, OSError):  # non-interactive (agent-run): show diff, apply only via --yes
                 print("non-interactive: nothing applied — review the diff above, re-run with --yes to apply")
                 return False

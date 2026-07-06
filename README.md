@@ -48,8 +48,13 @@ irrelevant prompts stay silent (abstention floor), failures never block the prom
 
 ```json
 {"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
-  "command": "uv run --project \"$CLAUDE_PROJECT_DIR\" engram hook --dir <memory-dir>"}]}]}}
+  "command": "uv run --project /abs/path/to/engram engram hook --dir <memory-dir>"}]}]}}
 ```
+
+Use an **absolute** `--project` path (or `uv tool install /abs/path/to/engram` and drop `uv run
+--project`, calling just `engram hook`). Don't rely on `$CLAUDE_PROJECT_DIR`: registered in a project
+that isn't engram, `uv` can't find the command and exits non-zero — and a non-zero UserPromptSubmit
+hook blocks the prompt.
 
 ### Curation
 

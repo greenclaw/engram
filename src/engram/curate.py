@@ -162,6 +162,10 @@ def apply(mem_dir, changeset: dict, confirm, now: date | None = None) -> bool:
         return False
     if not confirm(_diff(edits, mem_dir)):
         return False
+    for path, _new, old in edits:  # TOCTOU: an external edit while the gate was open must not be clobbered
+        current = path.read_text(encoding="utf-8") if path.exists() else ""
+        if current != old:
+            raise CurateError(f"{path.name} changed since the diff was shown — re-run curate")
     for path, new, _ in edits:
         path.parent.mkdir(parents=True, exist_ok=True)  # subdir notes (learnings/...)
         path.write_text(new, encoding="utf-8")
