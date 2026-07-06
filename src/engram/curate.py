@@ -33,6 +33,23 @@ def load_changeset(source: str) -> dict:
     return cs
 
 
+def auto_approvable(changeset: dict, threshold: float) -> bool:
+    """Decision-3 auto-gate: True iff every non-NOOP change carries a numeric confidence ≥ threshold
+    AND nothing re-touches curated prose — an UPDATE with a `body` edit stays human-gated regardless
+    (the evolution carve-out: hand-written note text is the asset). All-NOOP → nothing to auto-approve."""
+    gated = False
+    for ch in changeset.get("changes", []):
+        if not isinstance(ch, dict) or ch.get("op") == "NOOP":
+            continue
+        if ch.get("op") == "UPDATE" and "body" in ch:
+            return False
+        c = ch.get("confidence")
+        if isinstance(c, bool) or not isinstance(c, (int, float)) or c < threshold:
+            return False  # missing/non-numeric confidence (untrusted LLM output) never auto-applies
+        gated = True
+    return gated
+
+
 def _serialize(meta: dict, body: str) -> str:
     front = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
     return f"---\n{front}---\n{body}" + ("" if body.endswith("\n") else "\n")

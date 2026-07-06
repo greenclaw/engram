@@ -1,0 +1,30 @@
+{
+  "_note": "HARD candidate set for μ−Zσ gate calibration: confusable neighbor pairs (must pick the right target), value-change-vs-contradiction boundaries (stale value → UPDATE; explicit negation of the old fact → INVALIDATE), narrower-vs-refining boundaries (covered → NOOP; adds a real condition → UPDATE), cross-lingual duplicates. Built to produce variance the clean set can't.",
+  "notes": [
+    {"name": "deploy-freq", "type": "project", "description": "Deploys happen manually on Fridays."},
+    {"name": "deploy-target", "type": "project", "description": "Deploys go to the staging cluster first, then production."},
+    {"name": "db-local", "type": "project", "description": "Local development uses SQLite."},
+    {"name": "db-prod", "type": "project", "description": "Production data lives in Postgres."},
+    {"name": "packages", "type": "feedback", "description": "Use pnpm for JS dependencies, never npm or yarn."},
+    {"name": "python-env", "type": "feedback", "description": "Python projects use uv, never pip."},
+    {"name": "retry-policy", "type": "project", "description": "API calls retry 3 times with exponential backoff."},
+    {"name": "timeouts", "type": "project", "description": "HTTP client timeout is 30 seconds."},
+    {"name": "auth", "type": "project", "description": "Auth uses JWT access tokens with 15-minute expiry."},
+    {"name": "testing", "type": "feedback", "description": "Backend tests run with pytest."},
+    {"name": "branching", "type": "feedback", "description": "Feature work branches off main; merge via PR."}
+  ],
+  "candidates": [
+    {"text": "HTTP client timeout was raised from 30 to 60 seconds.", "op": "UPDATE", "target": "timeouts"},
+    {"text": "We found 15-minute JWT expiry too aggressive and moved to 60-minute access tokens.", "op": "UPDATE", "target": "auth"},
+    {"text": "API retries stay at 3 attempts with backoff, but now only for idempotent (GET/PUT) requests.", "op": "UPDATE", "target": "retry-policy"},
+    {"text": "Deploys are no longer manual — a GitHub Actions pipeline deploys automatically on merge.", "op": "INVALIDATE", "target": "deploy-freq"},
+    {"text": "Deploys now go straight to production; the staging step was removed.", "op": "INVALIDATE", "target": "deploy-target"},
+    {"text": "Local development now uses Postgres in Docker; SQLite was dropped entirely.", "op": "INVALIDATE", "target": "db-local"},
+    {"text": "JS packages are installed with pnpm.", "op": "NOOP", "target": "packages"},
+    {"text": "Python-зависимости ставим только через uv, pip не используем.", "op": "NOOP", "target": "python-env"},
+    {"text": "API calls to the payments service retry with exponential backoff.", "op": "NOOP", "target": "retry-policy"},
+    {"text": "We branch off main for feature work.", "op": "NOOP", "target": "branching"},
+    {"text": "Database schema migrations run through Alembic.", "op": "ADD"},
+    {"text": "Front-end unit tests use Vitest.", "op": "ADD"}
+  ]
+}

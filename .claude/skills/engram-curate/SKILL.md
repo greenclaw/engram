@@ -14,6 +14,7 @@ Turn session learnings into gated edits of an engram memory store. You adjudicat
 
 ## Flow
 
+0. Drain the queue: `uv run engram pending list --dir <store>` — sessions the Stop hook queued since the last curation. Read each queued transcript for candidates alongside the live session. After the batch is applied (step 6), `uv run engram pending clear --dir <store> <ids...>` for the sessions you curated.
 1. Gather candidates worth remembering: user corrections (especially repeated), hard-won gotchas (dead-end → working path), decisions with rationale, durable workflow lessons. Skip trivia, one-off details, and anything the repo/git history already records.
 2. Per candidate: `uv run engram recall "<candidate>" --dir <store> -k 5 --json`
 3. Adjudicate against the top hits:
@@ -26,6 +27,8 @@ Turn session learnings into gated edits of an engram memory store. You adjudicat
 | neighbor asserts the opposite | `INVALIDATE` neighbor + `ADD` the new fact (relation `contradictory`) |
 
 There is no DELETE. Superseded ≠ removed: `INVALIDATE` keeps the note and marks `invalidated_by`.
+
+**Evolution (A-MEM re-touch):** for each ADD, look at its top neighbors once more — if the new fact makes a neighbor's framing or `[[links]]` stale (worth re-pointing, not wrong), include an UPDATE of that neighbor in the same change-set. These edit hand-curated prose, so they go through the same gate as everything else — never sneak them in as "just a link fix".
 
 4. Write ONE change-set JSON for the whole batch (one op per note):
 
@@ -48,5 +51,6 @@ There is no DELETE. Superseded ≠ removed: `INVALIDATE` keeps the note and mark
 ## Red flags — stop and hand the gate back
 
 - About to run `--yes` and the user hasn't said yes to this diff → stop, show the diff.
+- About to pass `--auto-threshold` yourself → stop. It is user-configured automation (a bench-calibrated gate the USER wires into their hooks), not an agent bypass — same rule as `--yes`.
 - About to Edit/Write a store `.md` ("it's just the index line", "curate doesn't manage MEMORY.md", "faster by hand") → stop, express it as an op or leave it.
 - Reaching for the engram source code to recall the schema → it's above, in step 4.
