@@ -56,11 +56,11 @@ gap fix, NOT an effect size on realistic queries); n=12; end-to-end effect on as
 original claude-bench framing) and the live recall hook/wiring are still unvalidated/unbuilt.
 
 ## Increment 2 — curator (b)  [THE NOVEL PART]
-**Status (2026-07-02):** deterministic core ✅ (`curate.py`: change-set → diff → human gate → pathspec-only
-git commit; path-contained; UPDATE preserves frontmatter; INVALIDATE keeps the note). Scope cut for v1
-(manual-first, a strict prefix of the auto path): pending-store + Stop-hook deferred to fast-follow.
-**The LLM adjudication (skill) + `mem_curate` bench are NOT built — the novel claim is unvalidated until
-they land.**
+**Status (2026-07-06): increment 2 complete.** Deterministic core ✅ (`curate.py`: change-set → diff →
+human gate → pathspec-only git commit; path-contained; UPDATE preserves frontmatter; INVALIDATE keeps
+the note). LLM adjudication ✅ (`/engram-curate` skill, incl. the decision-5 evolution re-touch step).
+`mem_curate` bench ✅. Auto-gate ✅ calibrated (see done-when below). Pending-store + Stop-hook ✅
+(`pending.py`: enqueue on Stop, dedup by session_id, skill drains — the manual flow, auto-fed).
 **Build:**
 - `curate.py` — input = candidate facts (from a session transcript / `/retro`). For each:
   1. recall top-k similar existing notes (reuse (a)).
@@ -80,8 +80,14 @@ then calibrate the gate threshold like `calibrate_gate.py` (μ−Zσ over N veri
 ✅ **Instrument built + first numbers (2026-07-02):** `bench_curate.py` (12 labelled candidates, 4 op
 classes, headless `claude -p`) → **op_accuracy 100%, contradiction_catch 100%, false_invalidate 0 (3/3
 runs)**. *Caveats: clean-case set — an existence proof that skill rules + recall evidence adjudicate
-unambiguous candidates correctly; scores are model-dependent (`--model` flag). μ−Zσ auto-gate calibration
-needs a harder set (value-change vs contradiction boundaries, confusable neighbors) with real variance.*
+unambiguous candidates correctly; scores are model-dependent (`--model` flag).*
+✅ **Auto-gate calibrated (2026-07-06):** hard set (`curate_dataset_hard.json` — confusable neighbor
+pairs, value-change-vs-contradiction boundaries, narrower-vs-refining boundaries, cross-lingual
+duplicates) → **100/100/0 × 5 runs**; μ−2σ over per-change confidences (n=60) → **τ=0.770, coverage
+95%, risk 0%**. Wired as `curate apply --auto-threshold`; body-UPDATEs (prose re-touches) always fall
+back to the human gate (decision-3 carve-out). *Honest caveat: risk=0 is vacuous — five runs produced
+no op errors even on the boundary set (0/60 ⇒ error rate ≲5% at 95% CI). τ is a defensible knob, but
+flipping auto-commit ON by default should wait for an error-producing set or real-usage telemetry.*
 
 ## Validation (claude-bench, both increments)
 - Scenario `mem_recall`: does semantic recall find the needed fact? (hit-rate; recall on vs off).

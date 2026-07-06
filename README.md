@@ -56,6 +56,18 @@ Use an **absolute** `--project` path (or `uv tool install /abs/path/to/engram` a
 that isn't engram, `uv` can't find the command and exits non-zero — and a non-zero UserPromptSubmit
 hook blocks the prompt.
 
+### Session-end curation queue (Stop hook)
+
+Register the Stop hook and every finished session is queued for curation (fast — it only records the
+transcript path, deduped per session; the LLM work stays offline in the skill):
+
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command",
+  "command": "uv run --project /abs/path/to/engram engram pending add --dir <memory-dir>"}]}]}}
+```
+
+The next `/engram-curate` run drains the queue (`engram pending list` / `clear`).
+
 ### Curation
 
 The `/engram-curate` skill (`.claude/skills/engram-curate/`) drives the write path: Claude gathers
@@ -63,6 +75,11 @@ session learnings → recalls neighbors per candidate → adjudicates the op + r
 (compatible | contradictory | subsumes | subsumed) → emits one change-set → `engram curate apply`
 shows you the diff. **Only your explicit approval writes** (`--yes` after review); contradictions
 mark the old note `invalidated_by:` and keep it — git and the file both hold history.
+
+For scripted flows there is a **bench-calibrated auto-gate**: `curate apply --auto-threshold 0.770`
+auto-approves only when every change carries `confidence ≥ τ` and nothing rewrites hand-written note
+prose (body-UPDATEs always fall back to the human gate). τ comes from `bench_curate.py`'s μ−2σ
+calibration — recalibrate for your model before trusting it.
 
 ## How it works
 
@@ -130,7 +147,8 @@ writes flow through the gate, and only `engram` (after your explicit yes) touche
 | Bench | Result | Caveat |
 |---|---|---|
 | `bench_recall.py` — semantic vs lexical A/B | **100%@5 / 67%@1 vs 0%** lexical | constructed zero-overlap paraphrase set (n=12) — an existence proof of closing the semantic gap, not an effect size |
-| `bench_curate.py` — curator op-precision via headless `claude -p` | **op_accuracy 100%, contradiction-catch 100%, false-invalidate 0** (3/3 runs) | clean-case set; the μ−Zσ auto-gate calibration needs a harder boundary-case set |
+| `bench_curate.py` — curator op-precision via headless `claude -p` | **op_accuracy 100%, contradiction-catch 100%, false-invalidate 0** (3/3 runs) | clean-case set |
+| `bench_curate.py --dataset …_hard.json` — boundary set (confusable neighbors, value-change-vs-contradiction, cross-lingual) + μ−2σ gate calibration | **100/100/0 × 5 runs → τ=0.770, coverage 95%, risk 0%** (n=60) | risk=0 is a bound, not a measurement — no run produced an op error (0/60 ⇒ ≲5% at 95% CI); auto-commit stays opt-in (`--auto-threshold`) |
 
 ## Guardrails (non-negotiable)
 
@@ -151,9 +169,8 @@ writes flow through the gate, and only `engram` (after your explicit yes) touche
 
 ## Roadmap
 
-- Harder mem_curate candidate set → μ−Zσ gate calibration → auto-apply above threshold.
-- Recall downweight for `invalidated_by:` notes.
-- Pending-store + Stop-hook auto-trigger (curate at session end, review later).
+- An error-producing curate set (or real-usage telemetry) before auto-commit becomes a default —
+  today's `--auto-threshold` risk estimate is a bound (0/60), not a measurement.
 - Auto-tuned scoring weights (Bayesian/CMA-ES against the bench) — `RESEARCH.md` §6.
 
 ## License
