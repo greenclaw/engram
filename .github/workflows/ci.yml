@@ -14,6 +14,22 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync
-      # Non-model tests run here (pure logic + curate + hardening). Semantic/adjudication tests
-      # are skipif-model_available and need a cached bge-m3 — local-only until CI caches the model.
+      # Fast job: pure logic + curate + hardening (model-dependent tests skip without a cached bge-m3).
+      - run: uv run pytest -q
+
+  test-model:
+    # Full suite including semantic tests: bge-m3 ONNX (~2.3GB) is cached across runs; the embedder
+    # itself never downloads (local_files_only), so the cache is seeded here with `hf download`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-bge-m3-onnx-v1
+      - run: uv sync
+      - run: uv run hf download BAAI/bge-m3 onnx/model.onnx onnx/model.onnx_data tokenizer.json
       - run: uv run pytest -q

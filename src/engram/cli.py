@@ -22,6 +22,16 @@ def main(argv=None) -> int:
     ph.add_argument("--dir", required=True)
     ph.add_argument("-k", type=int, default=3)
 
+    pp = sub.add_parser("pending", help="pending-store: sessions queued by the Stop hook for curation")
+    pps = pp.add_subparsers(dest="pending_cmd", required=True)
+    ppa = pps.add_parser("add", help="Stop hook: enqueue the finished session (stdin hook JSON); never blocks")
+    ppa.add_argument("--dir", required=True)
+    ppl = pps.add_parser("list", help="list queued sessions as JSON")
+    ppl.add_argument("--dir", required=True)
+    ppc = pps.add_parser("clear", help="drop queued sessions (all, or the given session ids)")
+    ppc.add_argument("--dir", required=True)
+    ppc.add_argument("ids", nargs="*", help="session ids to drop (default: all)")
+
     pc = sub.add_parser("curate", help="apply a Claude-produced change-set (gated git commit)")
     pcs = pc.add_subparsers(dest="curate_cmd", required=True)
     pca = pcs.add_parser("apply", help="validate a change-set, show its diff, gate, commit")
@@ -29,6 +39,9 @@ def main(argv=None) -> int:
     pca.add_argument("--dir", required=True, help="the memory/ dir to apply into")
     pca.add_argument("--yes", action="store_true",
                      help="apply without the interactive prompt — bypasses the human gate (for scripting)")
+    pca.add_argument("--auto-threshold", type=float, default=None, metavar="TAU",
+                     help="auto-approve iff every change's confidence ≥ TAU and no body-UPDATE "
+                          "(bench-calibrated, μ−Zσ); otherwise fall back to the interactive gate")
 
     args = p.parse_args(argv)
 
@@ -86,14 +99,37 @@ def main(argv=None) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"engram hook: {e}", file=sys.stderr)
         return 0
+    elif args.cmd == "pending":
+        import json
+        import sys
+
+        from engram import pending
+
+        if args.pending_cmd == "add":
+            # Stop-hook semantics (like `hook`): any failure → warn on stderr, exit 0, never block
+            try:
+                data = json.load(sys.stdin)
+                sid, tp = data.get("session_id"), data.get("transcript_path")
+                if sid and tp:
+                    pending.add(args.dir, sid, tp)
+            except Exception as e:  # noqa: BLE001
+                print(f"engram pending: {e}", file=sys.stderr)
+            return 0
+        if args.pending_cmd == "list":
+            print(json.dumps(pending.load(args.dir), ensure_ascii=False, indent=2))
+        else:  # clear
+            print(f"cleared {pending.clear(args.dir, args.ids or None)}")
     elif args.cmd == "curate":
         import sys
 
-        from engram.curate import CurateError, apply, load_changeset
+        from engram.curate import CurateError, apply, auto_approvable, load_changeset
 
         def confirm(diff):
             print(diff or "(no textual diff)")
             if args.yes:
+                return True
+            if args.auto_threshold is not None and auto_approvable(cs, args.auto_threshold):
+                print(f"auto-approved: all confidences ≥ {args.auto_threshold}, no prose re-touch")
                 return True
             prompt = "apply these changes? [y/N] "
             try:  # stdin may be a piped change-set ('-') — read the gate answer from the terminal

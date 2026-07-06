@@ -5,8 +5,10 @@ few-hundred-note store a dense matrix + one matmul is plenty — no sqlite-vec, 
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -71,20 +73,53 @@ def _atomic_write(path: Path, write) -> None:
     os.replace(tmp, path)
 
 
+@contextmanager
+def _lock(mem_dir: Path):
+    """Exclusive flock serializing rebuilds — two concurrent first-recall rebuilds would otherwise
+    each load the (heavy) model and race their writes. POSIX-only (fcntl); Windows isn't a target."""
+    d = Path(mem_dir) / INDEX_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / ".lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def build_index(mem_dir) -> int:
     """(Re)build the index over `mem_dir` (full rebuild, atomic writes). Raises if the dir is missing."""
     mem_dir = Path(mem_dir)
     if not mem_dir.is_dir():  # a typo'd --dir must error, not auto-create an empty ghost store
         raise FileNotFoundError(f"memory dir does not exist: {mem_dir}")
-    notes = [parse_note(p) for p in _iter_notes(mem_dir)]
+    with _lock(mem_dir):
+        return _build(mem_dir)
+
+
+def _ensure_fresh(mem_dir: Path) -> None:
+    """Rebuild iff the source drifted. Re-checks staleness after acquiring the lock, so a recall that
+    waited behind a concurrent rebuild skips its own (no double model-load, no duplicate work)."""
+    if not _is_stale(mem_dir):
+        return
+    if not mem_dir.is_dir():  # before _lock — it mkdirs .engram (would ghost-create the store)
+        raise FileNotFoundError(f"memory dir does not exist: {mem_dir}")
+    with _lock(mem_dir):
+        if _is_stale(mem_dir):
+            _build(mem_dir)
+
+
+def _build(mem_dir: Path) -> int:
+    # stat() BEFORE reading/embedding: an edit landing during the multi-second embed then differs
+    # from the recorded fingerprint, so the next staleness check catches it (edit-during-rebuild race).
+    snap = [(p.stat(), parse_note(p)) for p in _iter_notes(mem_dir)]
+    notes = [n for _, n in snap]
     d, npy, metaf = _paths(mem_dir)
     d.mkdir(parents=True, exist_ok=True)
 
     vecs = Embedder().encode([_embed_text(n) for n in notes]) if notes else np.zeros((0, 1024), dtype=np.float32)
 
     meta = []
-    for n in notes:
-        st = n.path.stat()
+    for st, n in snap:
         updated = n.updated or date.fromtimestamp(st.st_mtime)
         meta.append({
             "path": str(n.path),
@@ -138,8 +173,7 @@ def recall(mem_dir, query: str, k: int = 5, now: date | None = None, floor: floa
     now = now or date.today()
     floor = _env_floor() if floor is None else floor
     mem_dir = Path(mem_dir)
-    if _is_stale(mem_dir):
-        build_index(mem_dir)  # raises FileNotFoundError on a nonexistent dir — no ghost store
+    _ensure_fresh(mem_dir)  # raises FileNotFoundError on a nonexistent dir — no ghost store
     mat, meta = _load(mem_dir)
     if not meta:
         return []

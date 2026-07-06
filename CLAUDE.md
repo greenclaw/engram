@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**engram** — a curated, git-native, plain-text **agent memory system** for Claude Code. **Increment 1 (service-less semantic recall) is built + validated** (2026-07-01, with caveats — see PLAN). **Increment 2's deterministic core (`curate apply`) is built** (2026-07-02); the novel half — the LLM-adjudication skill + `mem_curate` bench — is not, so the curator thesis is unvalidated yet. See `PLAN.md`.
+**engram** — a curated, git-native, plain-text **agent memory system** for Claude Code. **Both v1 increments are built + validated** (2026-07-06, with caveats — see PLAN): service-less semantic recall (live via UserPromptSubmit hook), the gated curator (skill + `curate apply`), the `mem_curate` bench with a μ−2σ-calibrated auto-gate (τ=0.770), and the pending-store + Stop-hook trigger. Remaining v1 caveats live in §Review-findings and PLAN; learned rotation stays a research flow. See `PLAN.md`.
 
 The thesis (novelty is an *integration* gap, not a research gap): fuse four ingredients that each exist separately but that **no single system combines** —
 1. a git-markdown Zettelkasten as **source of truth** (`memory/*.md` + `MEMORY.md` index + `[[links]]`),
@@ -51,10 +51,11 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 - `uv run pytest -q` — full suite (`test_core` pure logic; `test_recall`/`test_eval` load the real bge-m3 and **skip** if it's not in the local HF cache).
 - `uv run pytest tests/test_core.py -q` — fast pure-logic tests only (no model).
 - `uv run engram index --dir <memory/>` then `uv run engram recall "<query>" --dir <memory/> -k 5` — the CLI.
-- `uv run engram curate apply <changeset.json|-> --dir <memory/>` — validate a change-set → show diff → human gate → git commit. `--yes` skips the prompt (**live today** — a deliberate gate-bypass for scripting; the calibrated auto-gate will formalize it).
+- `uv run engram curate apply <changeset.json|-> --dir <memory/>` — validate a change-set → show diff → human gate → git commit. `--yes` skips the prompt (scripting bypass). `--auto-threshold TAU` is the calibrated auto-gate (decision 3): auto-approves iff every non-NOOP change carries `confidence ≥ TAU` **and** nothing re-touches curated prose (a body-UPDATE always falls back to the human gate).
 - `echo '{"prompt":"..."}' | uv run engram hook --dir <memory/>` — the UserPromptSubmit recall hook (prints L2 hits or nothing).
+- `uv run engram pending add|list|clear --dir <memory/>` — the pending-store: `add` is the Stop-hook enqueue (stdin hook JSON, dedup by session_id, never blocks — exit 0 on any failure); the `/engram-curate` skill drains the queue.
 - `uv run python bench_recall.py` — the increment-1 done-when A/B (semantic vs lexical hit-rate over `tests/fixtures/recall_dataset.json`).
-- `uv run python bench_curate.py [--runs N] [--model M] [--dry]` — the mem_curate bench: curator op-precision + contradiction-catch on `tests/fixtures/curate_dataset.json`, adjudicated by headless `claude -p` (no API key). First numbers: 100/100/0 × 3 runs on the clean-case set.
+- `uv run python bench_curate.py [--runs N] [--model M] [--dry] [--dataset F] [-z Z]` — the mem_curate bench: curator op-precision + contradiction-catch, adjudicated by headless `claude -p` (no API key), plus the μ−Zσ gate calibration over per-change confidences. Numbers: clean set 100/100/0 × 3; **hard set (confusables, value-change-vs-contradiction boundaries, cross-lingual) 100/100/0 × 5 → τ=0.770, coverage 95%, risk 0%** (n=60; risk is vacuously 0 — the set produced confidence variance but no op errors, so the sneak-through rate is bounded, not measured: 0/60 ⇒ ≲5% at 95% CI).
 
 Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_only` (never downloads). Override the repo with `ENGRAM_EMBED_REPO`.
 
@@ -64,7 +65,8 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 - `core.py` — note parsing (frontmatter+body, handles `type:` and nested `metadata.type`) + scoring. **Score is a Generative-Agents weighted sum, not a literal product** (a product zeroes an old-but-critical fact); weights = the L1 auto-tune knobs (`RESEARCH.md` §6).
 - `store.py` — build `.engram/index.npy` + `meta.json` (rebuildable secondary), recall = one matmul → **min-max-normalized** relevance × importance × recency. Normalization matters: raw cosine is compressed (~0.4–0.7), so without it importance/recency drown query match (the bench caught this). **Discovery is recursive** (rglob, skips MEMORY.md at any level + `.engram/`); **recall auto-rebuilds** when the source drifts (note added/edited/deleted, via count + mtime).
 - `cli.py`, `eval.py` (the A/B instrument).
-- `curate.py` (increment-2 core) — applies a Claude-produced change-set (ADD/UPDATE/INVALIDATE/NOOP) behind a human gate: unified diff → confirm → write + **pathspec-only** git commit (never sweeps the user's staged files). **Change-sets are untrusted LLM output**: paths are contained to the memory dir, required fields / duplicate targets / unknown ops fail loud (`CurateError`). UPDATE preserves untouched frontmatter; INVALIDATE sets `invalidated_by` and keeps the note.
+- `curate.py` (increment-2 core) — applies a Claude-produced change-set (ADD/UPDATE/INVALIDATE/NOOP) behind a human gate: unified diff → confirm → write + **pathspec-only** git commit (never sweeps the user's staged files). **Change-sets are untrusted LLM output**: paths are contained to the memory dir, required fields / duplicate targets / unknown ops fail loud (`CurateError`). UPDATE preserves untouched frontmatter; INVALIDATE sets `invalidated_by` and keeps the note. `auto_approvable()` is the decision-3 auto-gate predicate (all confidences ≥ τ, no prose re-touch).
+- `pending.py` — the Stop-hook queue (`.engram/pending.json`, derived state like the index): sessions enqueued at stop, drained by the skill. A corrupt queue reads as empty (hook resilience over strictness — it's rederivable convenience, not curated data).
 
 **Robustness policy:** bad notes **fail loud** — `core.MemoryNoteError` names the offending file (invalid YAML, or non-numeric `importance`); one corrupt note aborts the index rather than being silently skipped (curated data must surface).
 
@@ -78,11 +80,10 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 Top-cluster + batch-2 are **fixed** (`test_hardening.py`, `test_hardening2.py`): injection, enclosing-repo commit, invalidate-no-effect, frontmatter corruption, commit-after-write, untrusted-input, nested/MEMORY targets, yaml coercion, dropped UPDATE fields; plus rename-staleness ((mtime_ns,size) fingerprint), encode chunking, atomic index writes, TOCTOU gate re-read, ghost-store guard, `/dev/tty` gate, env-read-at-use, robust bench JSON, SKILL enum/step-7, `--yes`/`--help` wording, hook-registration docs.
 
-Still open (accepted / follow-up):
-- **Concurrency double model-load** — atomic writes fixed torn reads; two simultaneous first-prompt rebuilds can still each load the model (rare memory spike). A file lock would serialize.
-- **Edit-during-rebuild race** — a note edited *during* the multi-second embed (mtime lands before `np.save`) can be missed until its next change; rename + after-build edits are caught.
+Batch-3 (`test_hardening3.py`) closed the concurrency pair: rebuilds are **flock-serialized** with a post-lock staleness re-check (a recall that waited skips its own rebuild — no double model-load), and `_build` snapshots `stat()` **before** reading/embedding, so an edit landing during the multi-second embed differs from the recorded fingerprint and the next check rebuilds. CI now has a `test-model` job (cached bge-m3 via `hf download` + actions/cache) running the full semantic suite.
+
+Still open (accepted):
 - **min-max amplification in tiny stores** — a noise-level cosine gap can invert ranking when the tied pair are the store's global min/max; self-corrects as the store grows (documented tradeoff).
-- **CI semantic coverage** — CI (`.github/workflows/ci.yml`) runs the non-model suite; semantic/curate-adjudication tests need a cached bge-m3 and only run locally (CI model-caching is a follow-up).
 
 ## Build plan — next
 
@@ -93,8 +94,14 @@ Still open (accepted / follow-up):
      "command": "uv run --project /abs/path/to/engram engram hook --dir <memory-dir>"}]}]}}
    ```
    Use an **absolute** `--project` (or `uv tool install` engram and call bare `engram hook`) — not `$CLAUDE_PROJECT_DIR`: in a non-engram project `uv` fails to find the command and exits non-zero, and a non-zero UserPromptSubmit hook blocks the prompt. Hooks snapshot at session start — activates on the next session.
-3. ✅ **`mem_curate` bench** (`bench_curate.py`) — measures adjudication in isolation (mechanics are unit-tested): fixture store → recall evidence per candidate → one `claude -p` change-set → score vs labels. 100/100/0 × 3 on the clean-case set. Next for the auto-gate: a **harder** candidate set (boundary cases, confusables) to get variance worth calibrating (μ−Zσ).
-4. Fast-follow (cut from v1 deliberately): pending-store + Stop-hook auto-trigger — a strict superset of the manual flow, zero rework.
+3. ✅ **`mem_curate` bench** (`bench_curate.py`) — measures adjudication in isolation (mechanics are unit-tested): fixture store → recall evidence per candidate → one `claude -p` change-set → score vs labels. 100/100/0 × 3 on the clean-case set.
+4. ✅ **Auto-gate calibrated** (decision 3): hard boundary set (`curate_dataset_hard.json`) → 100/100/0 × 5, μ−2σ over per-change confidences → **τ=0.770** (coverage 95%, risk 0/60). `curate apply --auto-threshold 0.770` is the wired knob; body-UPDATEs (evolution re-touches of prose) stay human-gated regardless. *Risk is a bound, not a measurement — the hard set produced no op errors; auto-commit-by-default should wait for an error-producing set or real-usage telemetry.*
+5. ✅ **Pending-store + Stop-hook** (`pending.py`): the Stop hook enqueues `{session_id → transcript_path}` (dedup — Stop fires per response; never blocks), the skill drains the queue at the next curation. Registration:
+   ```json
+   {"hooks": {"Stop": [{"hooks": [{"type": "command",
+     "command": "uv run --project /abs/path/to/engram engram pending add --dir <memory-dir>"}]}]}}
+   ```
+6. ✅ **Evolution step** (decision 5) in the skill: ADD → re-check neighbors → gated UPDATE of stale framing/links in the same change-set.
 
 Increment-1 validation (done): `mem_recall` A/B measured directly — semantic **100%@5** vs lexical **0%@5** on the labelled paraphrase set. *Existence proof, not effect size: the set is built for ~zero lexical overlap; exact-keyword regression/confusables/scale untested; end-to-end effect on assistant answers unmeasured.*
 
