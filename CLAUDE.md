@@ -55,6 +55,7 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 - `echo '{"prompt":"..."}' | uv run engram hook --dir <memory/>` — the UserPromptSubmit recall hook (prints L2 hits or nothing).
 - `uv run engram pending add|list|clear --dir <memory/>` — the pending-store: `add` is the Stop-hook enqueue (stdin hook JSON, dedup by session_id, never blocks — exit 0 on any failure); the `/engram-curate` skill drains the queue.
 - `uv run python bench_recall.py` — the increment-1 done-when A/B (semantic vs lexical hit-rate over `tests/fixtures/recall_dataset.json`).
+- `uv run python bench_quality.py [--scale N] [-v]` — the recall quality dims (confusables p@1, negation, exact-keyword regression, cross-lingual, scale + abstention) over `tests/fixtures/recall_quality.json`.
 - `uv run python bench_curate.py [--runs N] [--model M] [--dry] [--dataset F] [-z Z]` — the mem_curate bench: curator op-precision + contradiction-catch, adjudicated by headless `claude -p` (no API key), plus the μ−Zσ gate calibration over per-change confidences. Numbers: clean set 100/100/0 × 3; **hard set (confusables, value-change-vs-contradiction boundaries, cross-lingual) 100/100/0 × 5 → τ=0.770, coverage 95%, risk 0%** (n=60; risk is vacuously 0 — the set produced confidence variance but no op errors, so the sneak-through rate is bounded, not measured: 0/60 ⇒ ≲5% at 95% CI).
 
 Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_only` (never downloads). Override the repo with `ENGRAM_EMBED_REPO`.
@@ -72,7 +73,7 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Abstention:** recall drops hits below a raw-cosine floor (`RELEVANCE_FLOOR`, default 0.35, env `ENGRAM_RELEVANCE_FLOOR`) → an unrelated query returns `[]` instead of a confident wrong hit. Deliberately conservative: bge-m3's relevant/irrelevant cosine bands **overlap** (~0.37–0.45; measured real-hit min 0.425 vs junk up to 0.44), so no clean τ exists — the default sits safely below real hits (never false-abstains) and only catches blatant off-topic. It's a bench-calibratable §6 knob.
 
-**Still untested quality dims (next):** confusables/precision, negation, cross-lingual matrix, exact-keyword regression, scale (>100 notes).
+**Quality dims measured** (`bench_quality.py`, 2026-07-07; small n — smoke-level existence proofs, not effect sizes): confusables **p@1 88% / hit@5 100%** (the one miss is a genuinely ambiguous query); negation polarity **100%** (n=4); exact-keyword regression **100%** (semantic doesn't lose the easy lexical case); cross-lingual RU↔EN **100%** (n=4, both directions); **scale 112 notes: p@1 67% / hit@5 100% — identical to the 12-note store, same misses** → distractors don't degrade recall; the @1 misses are the importance/recency-vs-relevance weighting artifact (the §6 tuning knob), not a retrieval failure. Abstention on off-topic: 2/3 silent; the leak scored cosine 0.374 — inside the documented 0.37–0.45 overlap band above the 0.35 floor.
 
 **Invalidation is now honored on read:** build_index records `invalidated: bool` and recall skips notes carrying `invalidated_by:` (they stay in the files, greppable; INVALIDATE no longer refreshes their recency).
 

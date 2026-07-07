@@ -1,0 +1,72 @@
+{
+  "_note": "Recall quality dims left untested by the increment-1 A/B (which used a zero-overlap paraphrase set). Each section is an isolated store + labelled queries. precision dims score @1 (the top hit must be THE right note among confusable neighbors); others score hit@k. The scale dim reuses recall_dataset.json plus ~100 generated distractors (see bench_quality.py).",
+  "confusables": {
+    "notes": [
+      {"name": "staging-deploy", "type": "project", "description": "Deploys go to the staging cluster first for smoke tests."},
+      {"name": "prod-deploy", "type": "project", "description": "Production deploys happen manually on Fridays."},
+      {"name": "db-local", "type": "project", "description": "Local development uses SQLite."},
+      {"name": "db-prod", "type": "project", "description": "Production data lives in Postgres 16 on RDS."},
+      {"name": "cache-redis", "type": "project", "description": "Session cache is Redis with a 1-hour TTL."},
+      {"name": "cache-cdn", "type": "project", "description": "Static assets are cached on the CDN for 24 hours."},
+      {"name": "auth-users", "type": "project", "description": "End users authenticate with magic links via email."},
+      {"name": "auth-service", "type": "project", "description": "Service-to-service auth uses mTLS certificates."}
+    ],
+    "queries": [
+      {"query": "where does production data live?", "expect": "db-prod"},
+      {"query": "what database do I use when developing locally?", "expect": "db-local"},
+      {"query": "how do human users log in?", "expect": "auth-users"},
+      {"query": "how do microservices authenticate to each other?", "expect": "auth-service"},
+      {"query": "how long are static files cached?", "expect": "cache-cdn"},
+      {"query": "what's the TTL for session data?", "expect": "cache-redis"},
+      {"query": "when do we ship to production?", "expect": "prod-deploy"},
+      {"query": "what happens before a production rollout?", "expect": "staging-deploy"}
+    ]
+  },
+  "negation": {
+    "notes": [
+      {"name": "telemetry-prod", "type": "project", "description": "Telemetry is enabled in production."},
+      {"name": "telemetry-dev", "type": "project", "description": "Telemetry is disabled in local development."},
+      {"name": "retries-idempotent", "type": "project", "description": "Retries are allowed for idempotent GET and PUT requests."},
+      {"name": "retries-payments", "type": "project", "description": "Retries are forbidden for payment POST requests."}
+    ],
+    "queries": [
+      {"query": "is telemetry turned off anywhere?", "expect": "telemetry-dev"},
+      {"query": "where is telemetry actually on?", "expect": "telemetry-prod"},
+      {"query": "which requests must never be retried?", "expect": "retries-payments"},
+      {"query": "which requests can be retried safely?", "expect": "retries-idempotent"}
+    ]
+  },
+  "keyword": {
+    "notes": [
+      {"name": "pnpm", "type": "feedback", "description": "Use pnpm for JS dependencies, never npm or yarn."},
+      {"name": "uv-python", "type": "feedback", "description": "Python projects use uv, never pip."},
+      {"name": "ruff", "type": "feedback", "description": "Code style is enforced by ruff."},
+      {"name": "pytest", "type": "feedback", "description": "Tests run with pytest."}
+    ],
+    "queries": [
+      {"query": "pnpm install", "expect": "pnpm"},
+      {"query": "how do we configure ruff?", "expect": "ruff"},
+      {"query": "run pytest", "expect": "pytest"},
+      {"query": "uv sync fails", "expect": "uv-python"}
+    ]
+  },
+  "cross-lingual": {
+    "notes": [
+      {"name": "backups", "type": "project", "description": "Database backups run nightly at 03:00 UTC."},
+      {"name": "secrets-keyring", "type": "feedback", "description": "Секреты хранятся в OS keyring и достаются через secret CLI, значения никогда не печатаются."},
+      {"name": "code-review", "type": "feedback", "description": "Каждый PR проходит ревью минимум одного мейнтейнера перед мержем."},
+      {"name": "logging", "type": "project", "description": "Structured logs go to stdout as JSON lines."}
+    ],
+    "queries": [
+      {"query": "когда делаются бэкапы базы данных?", "expect": "backups", "dir": "ru→en"},
+      {"query": "where are secrets stored and how are they read?", "expect": "secrets-keyring", "dir": "en→ru"},
+      {"query": "what is required before merging a pull request?", "expect": "code-review", "dir": "en→ru"},
+      {"query": "в каком формате пишутся логи?", "expect": "logging", "dir": "ru→en"}
+    ]
+  },
+  "abstention_offtopic": [
+    "how do I bake sourdough bread at home?",
+    "what is the capital of Australia?",
+    "лучший рецепт борща со сметаной"
+  ]
+}

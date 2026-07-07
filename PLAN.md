@@ -52,8 +52,12 @@ retrieval hit-rate measured directly (needs no LLM) rather than via claude-bench
 Scoring uses a Generative-Agents weighted **sum** with **min-max-normalized** components — a literal
 product, and un-normalized raw cosine, both let note-type/recency drown query relevance (the bench caught it).
 **Validity caveats:** the set is constructed for ~zero lexical overlap (existence proof of the semantic
-gap fix, NOT an effect size on realistic queries); n=12; end-to-end effect on assistant answers (the
-original claude-bench framing) and the live recall hook/wiring are still unvalidated/unbuilt.
+gap fix, NOT an effect size on realistic queries); n=12. **Quality dims measured 2026-07-07**
+(`bench_quality.py`): confusables p@1 88%/hit@5 100%, negation 100%, exact-keyword 100%, RU↔EN 100%,
+scale 112 notes ≡ 12-note baseline (p@1 67%, hit@5 100%, same misses — the @1 gap is the scoring-weights
+knob, §6, not retrieval); off-topic abstention 2/3 (one leak inside the known cosine overlap band).
+Small n per dim — smoke coverage. Still unmeasured: end-to-end effect on assistant answers (the
+original claude-bench framing) — the live hook wiring now exists, so dogfooding telemetry is the path.
 
 ## Increment 2 — curator (b)  [THE NOVEL PART]
 **Status (2026-07-06): increment 2 complete.** Deterministic core ✅ (`curate.py`: change-set → diff →
