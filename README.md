@@ -149,6 +149,7 @@ writes flow through the gate, and only `engram` (after your explicit yes) touche
 | `bench_recall.py` — semantic vs lexical A/B | **100%@5 / 67%@1 vs 0%** lexical | constructed zero-overlap paraphrase set (n=12) — an existence proof of closing the semantic gap, not an effect size |
 | `bench_curate.py` — curator op-precision via headless `claude -p` | **op_accuracy 100%, contradiction-catch 100%, false-invalidate 0** (3/3 runs) | clean-case set |
 | `bench_curate.py --dataset …_hard.json` — boundary set (confusable neighbors, value-change-vs-contradiction, cross-lingual) + μ−2σ gate calibration | **100/100/0 × 5 runs → τ=0.770, coverage 95%, risk 0%** (n=60) | risk=0 is a bound, not a measurement — no run produced an op error (0/60 ⇒ ≲5% at 95% CI); auto-commit stays opt-in (`--auto-threshold`) |
+| `bench_quality.py` — confusables / negation / exact-keyword / cross-lingual / scale | confusables **p@1 88%**, negation **100%**, keyword **100%**, RU↔EN **100%**; **scale 112 notes = 12-note baseline** (p@1 67%, hit@5 100%, same misses) | small n per dim (4–12) — smoke coverage; @1 misses are the scoring-weights artifact (§6 knob), not retrieval; off-topic abstention 2/3 (one leak at cosine 0.374, inside the known 0.37–0.45 overlap band) |
 
 ## Guardrails (non-negotiable)
 
