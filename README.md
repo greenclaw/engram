@@ -68,6 +68,9 @@ transcript path, deduped per session; the LLM work stays offline in the skill):
 
 The next `/engram-curate` run drains the queue (`engram pending list` / `clear`).
 
+**Kill switch:** `export ENGRAM_DISABLE=1` instantly silences both hooks (recall injection and
+session enqueue) without editing settings or restarting sessions — explicit CLI commands stay live.
+
 ### Curation
 
 The `/engram-curate` skill (`.claude/skills/engram-curate/`) drives the write path: Claude gathers

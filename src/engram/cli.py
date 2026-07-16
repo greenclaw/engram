@@ -45,6 +45,15 @@ def main(argv=None) -> int:
 
     args = p.parse_args(argv)
 
+    # ENGRAM_DISABLE kill switch: silences the ambient hook entrypoints only (recall hook +
+    # Stop-hook enqueue) — instant rollback without editing settings or restarting sessions.
+    # Explicit commands (index/recall/curate/pending list|clear) stay live. Env read at use.
+    if args.cmd == "hook" or (args.cmd == "pending" and args.pending_cmd == "add"):
+        import os
+
+        if os.environ.get("ENGRAM_DISABLE", "") not in ("", "0"):
+            return 0
+
     if args.cmd == "index":
         import sys
 
