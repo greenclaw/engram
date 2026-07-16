@@ -62,6 +62,8 @@ Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_onl
 
 **Kill switch:** `ENGRAM_DISABLE=1` silences the ambient entrypoints only (`engram hook`, `engram pending add` — both exit 0 immediately); explicit commands stay live. Instant rollback for the hook wiring without touching settings.
 
+**`--dir` is optional everywhere** (global-hook mode): default is the project's Claude auto-memory store derived from cwd (`~/.claude/projects/<slug>/memory`, slug = non-alphanumerics → `-`, worktrees cut at `/.worktrees/`). No store → ambient commands exit 0 silently, explicit commands fail loud (rc 2). One global registration (`uv tool install` + bare `engram hook` / `engram pending add` in `~/.claude/settings.json`) serves every project.
+
 ## Modules (increment 1 — built)
 
 - `embed.py` — service-less bge-m3 via onnxruntime; ONNX graph already bakes in CLS pooling → tokenize → `sentence_embedding` → L2-normalize.

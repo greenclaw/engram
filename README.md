@@ -43,28 +43,24 @@ uv run engram curate apply changeset.json --dir <memory/>
 
 ### Live recall in Claude Code sessions
 
-Register the hook — every prompt is semantically recalled against your store, hits land in context,
-irrelevant prompts stay silent (abstention floor), failures never block the prompt:
+`uv tool install /abs/path/to/engram`, then register the hooks **globally** (`~/.claude/settings.json`)
+— every prompt in every project is semantically recalled against that project's store, hits land in
+context, irrelevant prompts stay silent (abstention floor), failures never block the prompt:
 
 ```json
-{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
-  "command": "uv run --project /abs/path/to/engram engram hook --dir <memory-dir>"}]}]}}
+{"hooks": {
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "engram hook"}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "engram pending add"}]}]}}
 ```
 
-Use an **absolute** `--project` path (or `uv tool install /abs/path/to/engram` and drop `uv run
---project`, calling just `engram hook`). Don't rely on `$CLAUDE_PROJECT_DIR`: registered in a project
-that isn't engram, `uv` can't find the command and exits non-zero — and a non-zero UserPromptSubmit
-hook blocks the prompt.
+Without `--dir`, engram derives the store from cwd: the Claude Code auto-memory dir
+(`~/.claude/projects/<slug>/memory`, worktree sessions map to the main project's slug). No store for
+the project → the hooks stay silent. Pass `--dir` to target any other store; use the binary's
+absolute path (`~/.local/bin/engram`) if hooks don't see your PATH — a non-zero UserPromptSubmit
+hook (command not found) blocks the prompt.
 
-### Session-end curation queue (Stop hook)
-
-Register the Stop hook and every finished session is queued for curation (fast — it only records the
-transcript path, deduped per session; the LLM work stays offline in the skill):
-
-```json
-{"hooks": {"Stop": [{"hooks": [{"type": "command",
-  "command": "uv run --project /abs/path/to/engram engram pending add --dir <memory-dir>"}]}]}}
-```
+The Stop hook queues every finished session for curation (fast — it only records the transcript
+path, deduped per session; the LLM work stays offline in the skill).
 
 The next `/engram-curate` run drains the queue (`engram pending list` / `clear`).
 
