@@ -2,7 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
+
+
+def default_memory_dir(cwd=None) -> Path | None:
+    """The Claude Code auto-memory store for the project at cwd, or None if it doesn't exist.
+    Slug = path with non-alphanumerics replaced by '-'; worktree sessions map to the MAIN
+    project's store (cut at /.worktrees/)."""
+    base = str(Path(cwd) if cwd else Path.cwd()).split("/.worktrees/")[0]
+    slug = re.sub(r"[^A-Za-z0-9]", "-", base)
+    d = Path.home() / ".claude" / "projects" / slug / "memory"
+    return d if d.is_dir() else None
 
 
 def main(argv=None) -> int:
@@ -10,33 +21,34 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pi = sub.add_parser("index", help="(re)build the recall index over a memory dir")
-    pi.add_argument("--dir", required=True, help="path to a memory/ dir of *.md notes")
+    pi.add_argument("--dir", default=None,
+                    help="path to a memory/ dir of *.md notes (default: this project's Claude auto-memory store)")
 
     pr = sub.add_parser("recall", help="semantic recall over a memory dir")
     pr.add_argument("query")
-    pr.add_argument("--dir", required=True)
+    pr.add_argument("--dir", default=None)
     pr.add_argument("-k", type=int, default=5)
     pr.add_argument("--json", action="store_true", help="emit hits as JSON")
 
     ph = sub.add_parser("hook", help="UserPromptSubmit hook: print semantic recall for the prompt (stdin JSON)")
-    ph.add_argument("--dir", required=True)
+    ph.add_argument("--dir", default=None)
     ph.add_argument("-k", type=int, default=3)
 
     pp = sub.add_parser("pending", help="pending-store: sessions queued by the Stop hook for curation")
     pps = pp.add_subparsers(dest="pending_cmd", required=True)
     ppa = pps.add_parser("add", help="Stop hook: enqueue the finished session (stdin hook JSON); never blocks")
-    ppa.add_argument("--dir", required=True)
+    ppa.add_argument("--dir", default=None)
     ppl = pps.add_parser("list", help="list queued sessions as JSON")
-    ppl.add_argument("--dir", required=True)
+    ppl.add_argument("--dir", default=None)
     ppc = pps.add_parser("clear", help="drop queued sessions (all, or the given session ids)")
-    ppc.add_argument("--dir", required=True)
+    ppc.add_argument("--dir", default=None)
     ppc.add_argument("ids", nargs="*", help="session ids to drop (default: all)")
 
     pc = sub.add_parser("curate", help="apply a Claude-produced change-set (gated git commit)")
     pcs = pc.add_subparsers(dest="curate_cmd", required=True)
     pca = pcs.add_parser("apply", help="validate a change-set, show its diff, gate, commit")
     pca.add_argument("changeset", help="path to change-set JSON, or - for stdin")
-    pca.add_argument("--dir", required=True, help="the memory/ dir to apply into")
+    pca.add_argument("--dir", default=None, help="the memory/ dir to apply into (default: auto-memory store)")
     pca.add_argument("--yes", action="store_true",
                      help="apply without the interactive prompt — bypasses the human gate (for scripting)")
     pca.add_argument("--auto-threshold", type=float, default=None, metavar="TAU",
@@ -48,11 +60,22 @@ def main(argv=None) -> int:
     # ENGRAM_DISABLE kill switch: silences the ambient hook entrypoints only (recall hook +
     # Stop-hook enqueue) — instant rollback without editing settings or restarting sessions.
     # Explicit commands (index/recall/curate/pending list|clear) stay live. Env read at use.
-    if args.cmd == "hook" or (args.cmd == "pending" and args.pending_cmd == "add"):
+    ambient = args.cmd == "hook" or (args.cmd == "pending" and args.pending_cmd == "add")
+    if ambient:
         import os
 
         if os.environ.get("ENGRAM_DISABLE", "") not in ("", "0"):
             return 0
+
+    if args.dir is None:  # global-hook mode: one registration serves every project with a store
+        args.dir = default_memory_dir()
+        if args.dir is None:
+            if ambient:
+                return 0  # no store for this project — the hook stays silent, never blocks
+            import sys
+
+            print("engram: no --dir given and no auto-memory store exists for this project", file=sys.stderr)
+            return 2
 
     if args.cmd == "index":
         import sys
