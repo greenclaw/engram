@@ -60,6 +60,8 @@ Python via **`uv`** (never pip). Deps are light: onnxruntime + tokenizers + nump
 
 Embedder: local **ONNX bge-m3** resolved from the HF cache with `local_files_only` (never downloads). Override the repo with `ENGRAM_EMBED_REPO`.
 
+**Kill switch:** `ENGRAM_DISABLE=1` silences the ambient entrypoints only (`engram hook`, `engram pending add` — both exit 0 immediately); explicit commands stay live. Instant rollback for the hook wiring without touching settings.
+
 ## Modules (increment 1 — built)
 
 - `embed.py` — service-less bge-m3 via onnxruntime; ONNX graph already bakes in CLS pooling → tokenize → `sentence_embedding` → L2-normalize.
