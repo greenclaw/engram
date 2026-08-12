@@ -1,5 +1,10 @@
 # engram
 
+[![CI](https://github.com/greenclaw/engram/actions/workflows/ci.yml/badge.svg)](https://github.com/greenclaw/engram/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 Curated, git-native, plain-text memory for Claude Code agents.
 
 Your memory is a folder of markdown files that you own and edit. engram adds the two layers a

@@ -78,7 +78,7 @@ def main() -> None:
         offtopic = quality["abstention_offtopic"]
         silent = sum(not recall(scale_dir, q, k=5) for q in offtopic)
 
-    print(f"recall quality dims (p@1 = top hit is THE labelled note)\n")
+    print("recall quality dims (p@1 = top hit is THE labelled note)\n")
     for dim, r in rows:
         print(f"  {dim:22s} n={r['n']:2d}  p@1={r['p@1']:4.0%}  hit@5={r['hit@5']:4.0%}"
               + (f"  false-abstain={r['abstained']}" if r["abstained"] else ""))

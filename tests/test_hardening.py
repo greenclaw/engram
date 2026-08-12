@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from engram.core import MemoryNoteError, parse_note
+from engram.core import parse_note
 from engram.curate import CurateError, apply
 from engram.embed import model_available
 
