@@ -2,7 +2,6 @@
 
 Skipped if the bge-m3 model isn't in the local HF cache (no network downloads in tests).
 """
-from datetime import date
 
 import numpy as np
 import pytest

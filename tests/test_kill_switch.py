@@ -4,8 +4,8 @@ import io
 import json
 
 from engram.cli import main
-from engram.store import Hit
 from engram.pending import load
+from engram.store import Hit
 
 
 def _fake_recall(*a, **k):

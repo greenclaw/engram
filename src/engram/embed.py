@@ -36,9 +36,9 @@ def model_available() -> bool:
 class Embedder:
     """Loaded once per process (heavy). `Embedder()` returns the shared instance."""
 
-    _instance: "Embedder | None" = None
+    _instance: Embedder | None = None
 
-    def __new__(cls) -> "Embedder":
+    def __new__(cls) -> Embedder:
         if cls._instance is None:
             inst = super().__new__(cls)
             inst._load()

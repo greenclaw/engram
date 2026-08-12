@@ -14,7 +14,6 @@ from engram.core import (
 )
 from engram.store import _iter_notes
 
-
 # --- importance ---------------------------------------------------------
 
 def test_default_importance_ranks_feedback_above_reference():

@@ -6,7 +6,6 @@ import pytest
 from bench_curate import calibrate, score_changeset
 from engram.curate import auto_approvable
 
-
 # --- auto_approvable ---------------------------------------------------------
 
 def _cs(*changes):
