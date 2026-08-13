@@ -1,4 +1,4 @@
-# engram
+# Engram
 
 [![CI](https://github.com/greenclaw/engram/actions/workflows/ci.yml/badge.svg)](https://github.com/greenclaw/engram/actions/workflows/ci.yml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -7,7 +7,7 @@
 
 Curated, git-native, plain-text memory for Claude Code agents.
 
-Your memory is a folder of markdown files that you own and edit. engram adds the two layers a
+Your memory is a folder of markdown files that you own and edit. Engram adds the two layers a
 hand-curated store lacks — semantic recall and a reviewable curator — without taking the files
 away from you.
 
@@ -28,7 +28,7 @@ prior-art verdict are in [`RESEARCH.md`](RESEARCH.md).
 ## Install
 
 Requires Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and the `BAAI/bge-m3` ONNX model in
-your local Hugging Face cache — engram never downloads models on its own.
+your local Hugging Face cache — Engram never downloads models on its own.
 
 ```bash
 git clone git@github.com:greenclaw/engram.git && cd engram
@@ -67,7 +67,7 @@ From then on, every prompt in every project is recalled against that project's s
 notes land in context. Off-topic prompts stay silent thanks to an abstention floor, and a hook
 failure never blocks the prompt.
 
-When `--dir` is omitted, engram derives the store from the working directory: the Claude Code
+When `--dir` is omitted, Engram derives the store from the working directory: the Claude Code
 auto-memory path `~/.claude/projects/<slug>/memory`, with worktree sessions mapped to their main
 project. Projects without a store are simply skipped. If hooks can't see your PATH, use the
 binary's absolute path (`~/.local/bin/engram`) — a failing UserPromptSubmit hook would otherwise
@@ -190,7 +190,7 @@ These are non-negotiable and define the design:
   validity, poisoning.
 - [`PLAN.md`](PLAN.md) — architecture, resolved design decisions, build increments with their
   done-when criteria.
-- [`CONTEXT.md`](CONTEXT.md) — the hand-run memory practice engram grew out of.
+- [`CONTEXT.md`](CONTEXT.md) — the hand-run memory practice Engram grew out of.
 - [`CLAUDE.md`](CLAUDE.md) — working guide for agents in this repo.
 
 ## Roadmap
