@@ -73,7 +73,11 @@ def _baseline(ws: Path, bench: Bench, st: dict, val: list, *, model: str, parall
     log(f"baseline R_best={r:.3f}")
 
 
-def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log=print) -> dict:
+def _log(msg: str) -> None:
+    print(msg, flush=True)  # stdout redirected to a file is block-buffered; progress must land per line
+
+
+def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log=_log) -> dict:
     """Run Algorithm 1 up to iteration `iters`. Resumable at every step: traces resume from raw/,
     and st["pending"] records a finished Maintainer step and the stored proposal of the running
     iteration, so a crash (e.g. a failed val rollout) never re-applies the wiki or re-proposes."""

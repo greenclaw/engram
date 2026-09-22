@@ -303,3 +303,14 @@ def test_evaluate_self_and_transfer(monkeypatch, tmp_path):
     (other / "SKILL.md").write_text("Z")
     L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1, skills_dir=other.parent)
     assert "Z" in seen["skills"] and seen["out"].name.startswith("eval-test-other-")
+
+
+def test_default_log_flushes_so_progress_reaches_a_redirected_log(monkeypatch, tmp_path):
+    """Full run 2026-09-22: stdout redirected to a file is block-buffered, so no iteration line
+    reached the log until the whole `run` exited. The default logger must flush every line."""
+    ws = _ws(tmp_path)
+    _wire(monkeypatch, val_scores=[0.5, 0.5], proposals=[CREATE])
+    calls = []
+    monkeypatch.setattr(L, "print", lambda *a, **kw: calls.append(kw), raising=False)
+    L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1)
+    assert calls and all(kw.get("flush") is True for kw in calls)
