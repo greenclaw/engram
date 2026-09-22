@@ -95,6 +95,15 @@ rewrites hand-written note prose — body edits always fall back to the human ga
 comes from `bench_curate.py`'s μ−2σ calibration; recalibrate it for your own model before relying
 on it.
 
+### Skill evolution (WikiSkill)
+
+`engram evolve` implements *WikiSkill* (Tang et al., arXiv:2608.27454): an inference agent
+rolls out on training tasks, a Wiki Maintainer compiles the traces into a persistent
+`wiki/` of patterns, a ReAct Skill Proposer reads the wiki and proposes one skill change,
+and a strict validation gate keeps it only if the validation score improves — the wiki is
+never rolled back. First bench: LiveMathematicianBench. Design:
+`docs/superpowers/specs/2026-09-22-wikiskill-design.md`.
+
 ## How it works
 
 The source of truth is `memory/*.md` with frontmatter (`name`, `description`, `type`,
