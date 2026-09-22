@@ -74,24 +74,32 @@ def _infer(bench: Bench, ws: Path, task: Task, system: str, model: str, out_dir:
         return json.loads(f.read_text())
     prompt = bench.user_prompt(task)
     res = run_claude(prompt, system=system, model=model, cwd=ws, tools=list(bench.tools))
-    resp = "" if res.is_error else res.text
-    hits = _PRED.findall(resp)
-    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": resp,
+    if res.is_error:  # not a measurement: keep a diagnostic, never a scorable trace (resume re-rolls it)
+        f.with_suffix(".error.json").write_text(json.dumps({"id": task["id"], "error": res.text, "raw": res.raw},
+                                                           ensure_ascii=False, indent=1))
+        return {"id": task["id"], "error": res.text}
+    hits = _PRED.findall(res.text)
+    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.text,
                  "answer": hits[-1] if hits else "", "gold": task["answer"],
-                 "score": bench.score(task, resp), "cost_usd": res.cost_usd}
-    if res.is_error:
-        tr["error"] = res.text
+                 "score": bench.score(task, res.text), "cost_usd": res.cost_usd}
     f.write_text(json.dumps({**tr, "raw": res.raw}, ensure_ascii=False, indent=1))
     return tr
 
 
 def rollout(bench: Bench, ws: Path, tasks: list[Task], *, skills_text: str, model: str,
             parallel: int, out_dir: Path) -> list[Trace]:
-    """Eq. 1: every task once, with the active skills fully injected and no wiki access."""
+    """Eq. 1: every task once, with the active skills fully injected and no wiki access.
+    Any failed call fails the whole rollout loud — a score with holes would corrupt the gate."""
     out_dir.mkdir(parents=True, exist_ok=True)
     split, system = _split_of(out_dir), bench.system_prompt(skills_text)
     with ThreadPoolExecutor(max_workers=max(1, parallel)) as ex:
-        return list(ex.map(lambda t: _infer(bench, ws, t, system, model, out_dir, split), tasks))
+        traces = list(ex.map(lambda t: _infer(bench, ws, t, system, model, out_dir, split), tasks))
+    failed = [t["id"] for t in traces if "error" in t]
+    if failed:
+        raise RoleError(f"{len(failed)} of {len(tasks)} rollouts failed in {out_dir.name} "
+                        f"({failed[0]}: {traces[[t['id'] for t in traces].index(failed[0])]['error'][:120]!r}); "
+                        "re-run to retry only the failed tasks")
+    return traces
 
 
 def mean_score(traces: list[Trace]) -> float:

@@ -46,11 +46,26 @@ def test_rollout_split_labels(monkeypatch, tmp_path):
         assert tr[0]["split"] == split
 
 
-def test_rollout_error_is_zero_score(monkeypatch, tmp_path):
+def test_rollout_error_fails_loud_and_is_not_persisted(monkeypatch, tmp_path):
+    """A failed claude call is not a measurement: no <id>.json (so resume re-rolls it), a diagnostic
+    <id>.error.json instead, and the rollout raises so no gate decision is made on a bogus 0."""
+    def flaky(prompt, **kw):
+        if prompt.startswith("q0"):
+            return ClaudeResult(text="Not logged in", structured=None, turns=0, cost_usd=0, is_error=True)
+        return ClaudeResult(text="<answer>A</answer>", structured=None, turns=1, cost_usd=0, is_error=False)
+
+    monkeypatch.setattr(r, "run_claude", flaky)
+    with pytest.raises(r.RoleError, match="1 of 2"):
+        r.rollout(LiveMath(), tmp_path, [_task(0), _task(1)], skills_text="", model="haiku", parallel=1,
+                  out_dir=tmp_path / "o")
+    assert not (tmp_path / "o/t0.json").exists()
+    assert "Not logged in" in (tmp_path / "o/t0.error.json").read_text()
+    # the healthy sibling was still persisted — a retry only re-rolls the failed one
     monkeypatch.setattr(r, "run_claude", lambda *a, **k: ClaudeResult(
-        text="Not logged in", structured=None, turns=0, cost_usd=0, is_error=True))
-    tr = r.rollout(LiveMath(), tmp_path, [_task(0)], skills_text="", model="haiku", parallel=1, out_dir=tmp_path / "o")
-    assert tr[0]["score"] == 0.0 and tr[0]["error"] == "Not logged in"
+        text="<answer>B</answer>", structured=None, turns=1, cost_usd=0, is_error=False))
+    tr = r.rollout(LiveMath(), tmp_path, [_task(0), _task(1)], skills_text="", model="haiku", parallel=1,
+                   out_dir=tmp_path / "o")
+    assert [t["score"] for t in tr] == [1.0, 0.0]
 
 
 def test_sample_traces_budget_and_cap():

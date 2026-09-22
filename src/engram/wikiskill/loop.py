@@ -53,9 +53,9 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
     if st["r_best"] is None:  # line 3: baseline validation with S_0 = ∅
         st["r_best"] = mean_score(rollout(bench, ws, val, skills_text="", model=model, parallel=parallel,
                                           out_dir=ws / "raw/val-0"))
-        tag(ws, "accepted-0")
         save_state(ws, st)
         commit_all(ws, f"iter 0: baseline val {st['r_best']:.3f}")
+        tag(ws, "accepted-0")  # after the commit: a tag names the tree it must restore
         log(f"baseline R_best={st['r_best']:.3f}")
     for k in range(st["iteration"] + 1, iters + 1):
         if st["r_best"] >= 1.0:  # line 5: early stop
@@ -63,6 +63,7 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
             save_state(ws, st)
             log("R_best = 1.0 — early stop")
             break
+        restore_skills(ws, _last_accepted(st))  # S_{k-1} exactly, even after a crash mid-iteration
         traces = rollout(bench, ws, train, skills_text=skill_section(ws), model=model, parallel=parallel,
                          out_dir=ws / f"raw/iter-{k}")  # line 8
         log(f"iter {k}: train R={mean_score(traces):.3f}")
@@ -77,25 +78,27 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
                 entry["outcome"] = "NoAction"
             else:
                 diff, _ = apply_proposal(ws, p)  # line 12
-                r_val = mean_score(rollout(bench, ws, val, skills_text=skill_section(ws), model=model,
-                                           parallel=parallel, out_dir=ws / f"raw/val-{k}"))  # line 13
-                if r_val > st["r_best"]:  # line 14: strict improvement
-                    st["r_best"] = r_val
-                    tag(ws, f"accepted-{k}")
-                    entry["outcome"] = "Accepted"
-                else:
-                    restore_skills(ws, _last_accepted(st))  # line 17: skills only, wiki retained
-                    entry["outcome"] = "Rejected"
-        except (RoleError, ProposalError) as e:
+        except (RoleError, ProposalError) as e:  # only the Proposer's own failures; rollout errors propagate
             entry["outcome"] = "Invalid"
             log(f"iter {k}: invalid proposal: {e}")
             restore_skills(ws, _last_accepted(st))
+        if entry["outcome"] is None:
+            r_val = mean_score(rollout(bench, ws, val, skills_text=skill_section(ws), model=model,
+                                       parallel=parallel, out_dir=ws / f"raw/val-{k}"))  # line 13
+            if r_val > st["r_best"]:  # line 14: strict improvement
+                st["r_best"] = r_val
+                entry["outcome"] = "Accepted"
+            else:
+                restore_skills(ws, _last_accepted(st))  # line 17: skills only, wiki retained
+                entry["outcome"] = "Rejected"
         entry["r_val"], entry["r_best"] = r_val, st["r_best"]
         append_impact(ws, k, p, diff, r_val, st["r_best"], entry["outcome"])  # line 19
         st["history"].append(entry)
         st["iteration"] = k
         save_state(ws, st)
         commit_all(ws, f"iter {k}: {entry['outcome']} val={_fmt(r_val)} best={st['r_best']:.3f}")
+        if entry["outcome"] == "Accepted":
+            tag(ws, f"accepted-{k}")  # after the commit: the tag must name a tree that holds the skill
         log(f"iter {k}: {entry['outcome']} val={_fmt(r_val)} best={st['r_best']:.3f}")
     return st
 

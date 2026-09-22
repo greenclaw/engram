@@ -80,6 +80,8 @@ def test_gate_accept_and_early_stop(monkeypatch, tmp_path):
     assert "— Accepted" in impact and "+rule" in impact
     assert (ws / "skills/s1/SKILL.md").read_text().endswith("rule\n")
     assert "accepted-1" in w.git(ws, "tag")
+    # the tag names a tree that actually holds the accepted skill (a rollback restores it)
+    assert "skills/s1/SKILL.md" in w.git(ws, "ls-tree", "-r", "--name-only", "accepted-1")
     assert (ws / "wiki/patterns/p.md").exists() and "found p" in (ws / "wiki/log.md").read_text()
     assert (ws / "raw/val-0").is_dir() and (ws / "raw/iter-1").is_dir() and (ws / "raw/val-1").is_dir()
 
@@ -152,6 +154,32 @@ def test_maintainer_error_aborts_iteration_cleanly(monkeypatch, tmp_path):
         L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
     st = L.load_state(ws)
     assert st["iteration"] == 0 and st["r_best"] == 0.5  # baseline persisted; iteration 1 not recorded
+
+
+def test_crash_after_apply_does_not_leak_candidate_into_next_run(monkeypatch, tmp_path):
+    """Val rollout dies after the candidate skill was written: on resume the iteration restarts
+    from S_{k-1} (skills restored from the last accepted tag), not from the un-gated candidate."""
+    ws = _ws(tmp_path)
+    it = _wire(monkeypatch, val_scores=[0.5, 0.5], proposals=[CREATE, {"action": "no_action"}])
+    real_rollout = L.rollout
+    seen_train_skills = []
+
+    def dying_rollout(bench, ws_, tasks, *, skills_text, model, parallel, out_dir):
+        if out_dir.name == "val-1":
+            raise r.RoleError("2 of 2 rollouts failed")
+        if out_dir.name.startswith("iter-"):
+            seen_train_skills.append(skills_text)
+        return real_rollout(bench, ws_, tasks, skills_text=skills_text, model=model, parallel=parallel,
+                            out_dir=out_dir)
+
+    monkeypatch.setattr(L, "rollout", dying_rollout)
+    with pytest.raises(r.RoleError):
+        L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    assert (ws / "skills/s1/SKILL.md").exists()  # the crash left the candidate on disk
+    assert L.load_state(ws)["iteration"] == 0
+    L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    assert seen_train_skills == ["", ""]  # both attempts trained on S_0, never on the candidate
+    assert not (ws / "skills/s1").exists() and it["prop"] == 2
 
 
 def test_evaluate_self_and_transfer(monkeypatch, tmp_path):
