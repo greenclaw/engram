@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from engram.wikiskill.bench import LiveMath, get_bench, make_splits, write_split
-from engram.wikiskill.loop import evaluate, evolve, load_state
+from engram.wikiskill.loop import EvolveError, evaluate, evolve, load_state
 from engram.wikiskill.workspace import commit_all, init_workspace
 
 
@@ -56,7 +56,11 @@ def run_evolve(args) -> int:
         return 0
     bench = get_bench(_meta(ws)["bench"])
     if args.evolve_cmd == "run":
-        st = evolve(ws, bench, model=args.model, iters=args.iters, parallel=args.parallel)
+        try:
+            st = evolve(ws, bench, model=args.model, iters=args.iters, parallel=args.parallel)
+        except EvolveError as e:
+            print(f"engram evolve: {e}", file=sys.stderr)
+            return 2
         print(f"done: iteration={st['iteration']} R_best={st['r_best']:.3f} stopped={st['stopped']}")
         return 0
     if args.evolve_cmd == "eval":

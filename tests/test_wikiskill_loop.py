@@ -146,6 +146,16 @@ def test_resume_from_state(monkeypatch, tmp_path):
     assert "accepted-2" in w.git(ws, "tag")
 
 
+def test_model_is_recorded_and_a_resume_with_another_model_is_refused(monkeypatch, tmp_path):
+    ws = _ws(tmp_path)
+    _wire(monkeypatch, val_scores=[0.5, 0.5, 0.5], proposals=[CREATE, CREATE])
+    L.evolve(ws, FakeBench(), model="haiku", iters=1, parallel=1, **QUIET)
+    assert L.load_state(ws)["model"] == "haiku"
+    with pytest.raises(L.EvolveError, match="haiku"):
+        L.evolve(ws, FakeBench(), model="sonnet", iters=2, parallel=1, **QUIET)
+    assert L.load_state(ws)["iteration"] == 1
+
+
 def test_role_error_is_invalid_not_crash(monkeypatch, tmp_path):
     ws = _ws(tmp_path)
     _wire(monkeypatch, val_scores=[0.5], proposals=[])

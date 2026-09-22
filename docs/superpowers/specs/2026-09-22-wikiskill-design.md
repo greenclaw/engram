@@ -35,7 +35,7 @@ Where Claude Code forces a deviation it is listed in §Deviations.
   wiki/patterns/<name>.md          one page per pattern
   skills/<name>/SKILL.md           full skill content (frontmatter + When to Apply + When NOT + Instructions)
   skills/<name>/PURPOSE.md         Origin + Patterns Addressed + Evolution History
-  state.json                       {bench, model, iteration, r_best, history: [...]}
+  state.json                       {model, iteration, r_best, history: [...], pending?}  (bench in dataset/meta.json)
 ```
 
 The workspace is a git repository. Every iteration ends in one commit; an
@@ -49,11 +49,13 @@ class Task(TypedDict): id: str; question: str; choices: dict[str, str]; answer: 
 class Bench(Protocol):
     name: str
     tools: list[str]                      # claude -p --tools; [] for LiveMath
-    def load(self, split: str) -> list[Task]: ...
     def system_prompt(self, skill_section: str) -> str   # E.1 prompt with {skill_section}
     def user_prompt(self, task: Task) -> str
     def score(self, task: Task, response: str) -> float  # in [0, 1]
 ```
+
+Splits are materialized once by `init` (`dataset/<split>.jsonl`) and read back with `read_split`, so the
+protocol needs no `load`; a bench only adds its own downloader (`LiveMath.download_records`).
 
 **LiveMath**: dataset `LiveMathematicianBench/LiveMathematicianBench` pulled via
 `huggingface_hub` at `init`, shuffled with `--seed`, cut 35/18/124 (Table 6),
@@ -87,7 +89,8 @@ to `wiki/log.md` — the wiki is never corrupted by a bad patch. Then it revises
 10–20 ReAct turns; the flag is accepted by `claude` 2.1.278 though absent from
 its `--help`). System prompt = E.3 verbatim except path aliases (see
 Deviations). Initial user message = `wiki/index.md` + `wiki/skill-impact.md` +
-a summary of all train outcomes (`id, pass/fail, prediction, gold`). The agent
+the active skills S_{k-1} (full SKILL.md text, or "none") + a summary of all
+train outcomes (`id, pass/fail, prediction, gold`). The agent
 reads pattern pages and `raw/iter-k/<id>.json` on demand. Final answer via
 `--json-schema`: `{action: "create"|"patch"|"no_action", name, skill_md,
 purpose_md}` or `{action: "patch", name, edits[]}`. Atomic: one proposal, one

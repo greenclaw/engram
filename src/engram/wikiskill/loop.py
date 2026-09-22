@@ -28,6 +28,10 @@ from engram.wikiskill.workspace import (
 )
 
 
+class EvolveError(RuntimeError):
+    """A run that would corrupt the experiment (e.g. resuming with a different model)."""
+
+
 def load_state(ws: Path) -> dict:
     p = ws / "state.json"
     if p.exists():
@@ -75,6 +79,9 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
     iteration, so a crash (e.g. a failed val rollout) never re-applies the wiki or re-proposes."""
     train, val = read_split(ws / "dataset/train.jsonl"), read_split(ws / "dataset/val.jsonl")
     st = load_state(ws)
+    if st.setdefault("model", model) != model:  # one evolution = one model (self-evolution, §4.1)
+        raise EvolveError(f"workspace was evolved with --model {st['model']}; resuming with {model} would "
+                          "mix models in one run — use the same --model or a new --ws")
     if st["r_best"] is None:
         _baseline(ws, bench, st, val, model=model, parallel=parallel, log=log)
     roles = ws / "raw/roles"
