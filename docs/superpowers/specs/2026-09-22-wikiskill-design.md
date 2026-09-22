@@ -57,7 +57,9 @@ class Bench(Protocol):
 
 **LiveMath**: dataset `LiveMathematicianBench/LiveMathematicianBench` pulled via
 `huggingface_hub` at `init`, shuffled with `--seed`, cut 35/18/124 (Table 6),
-written to `dataset/*.jsonl`; offline afterwards. Score = `1.0` iff the letter
+written to `dataset/*.jsonl`; offline afterwards. The raw records always store the
+correct option under "A" with B–E as distractors, so the five options are
+re-lettered per task with the same seed — otherwise "always answer A" scores 100%. Score = `1.0` iff the letter
 inside the last `<answer>…</answer>` equals the gold letter, else `0.0`
 (missing or malformed answer = 0).
 
@@ -176,6 +178,17 @@ Live smoke (manual): `init` + `run --iters 1` on 3 train / 3 val tasks with Haik
   significance is a later addition.
 - **Git per iteration** — the paper does not version the workspace; engram
   does, for the audit trail. It changes nothing in the algorithm.
+
+## Known benchmark property (verified 2026-09-22)
+
+LiveMathematicianBench is "substitution-resistant" by design (arXiv:2604.01754): for a fraction of
+items the true theorem is replaced by the meta option *"One of the remaining options is correct, but
+a stronger result can be proven."* In the released data that option appears **only** when it is the
+correct answer — 81 of the 177 tasks in our split (46%). "Pick the meta option when present" is
+therefore a strong shortcut, and the first live-smoke Proposer found it immediately ("default to the
+meta option"). We keep the benchmark unchanged (a faithful reproduction evaluates what the paper
+evaluated); when reading LiveMath gains — ours or the paper's — check how much of the delta is this
+shortcut, e.g. by scoring meta and non-meta items separately.
 
 ## Non-goals (v1)
 

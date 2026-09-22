@@ -1802,4 +1802,4 @@ uv run engram evolve eval --ws <ws> --split test --model haiku       # no-skill 
 uv run engram evolve run  --ws <ws> --model haiku --iters 8 --parallel 8
 uv run engram evolve eval --ws <ws> --split test --model haiku       # WikiSkill
 ```
-Budget estimate at ~0.005 USD per LiveMath call: 18 + 8×(35+18) = 442 rollouts ≈ 2.5 USD + 8 Maintainer + 8 Proposer (≤25 turns) ≈ 3–5 USD; test eval 124 × 2 ≈ 1.2 USD. Record the two test numbers and `status` in `PLAN.md`.
+Budget (measured in the 2026-09-22 live smoke, Haiku 4.5): ~0.03–0.04 USD and ~60 s per LiveMath call — Haiku reasons ~5k output tokens per research-level question. 18 + 8×(35+18) = 442 rollouts ≈ 15 USD + 8 Maintainer + 8 Proposer ≈ 1 USD; test eval 124 × 2 ≈ 9 USD. Total ≈ 25 USD; `status` shows the per-iteration cost as it runs. Record the two test numbers and `status` in `PLAN.md`.
