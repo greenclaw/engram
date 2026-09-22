@@ -98,6 +98,28 @@ flipping auto-commit ON by default should wait for an error-producing set or rea
 - Scenario `mem_curate`: labelled ops → curator precision/recall on ADD/UPDATE/DELETE/NOOP + contradiction.
 - Reuse `~/projects/claude-bench` harness + the calibration pattern.
 
+## WikiSkill — first full run (2026-09-23)
+`engram evolve` (arXiv:2608.27454), LiveMathematicianBench, split 35/18/124 seed 0, Claude Haiku 4.5
+in all three roles, 8 iterations. Workspace: `~/projects/engram-runs/livemath-haiku-s0`.
+
+| | test (124) | meta-gold items (57) | other items (67) |
+|---|---|---|---|
+| no skills | 22.6% | 1.8% | 40.3% |
+| WikiSkill (1 skill, 270 lines) | **58.1%** | 73.7% | 44.8% |
+
+- Validation 0.278 → 0.722; 4 Accepted (iters 1, 3, 5, 7), 4 Rejected; every accepted step
+  patched the same skill `recognize_meta_options`; a second skill (iter 4) was rejected.
+- Paired test delta +35.5 pts (bootstrap 95% CI +24.2…+45.2): 52 items fixed, 8 broken.
+- **Almost all of it is the benchmark shortcut.** The meta option is gold on 46% of items and never
+  a distractor; the evolved skill picks it 42/57 times it is shown (vs 1/57 without skills). On the
+  67 items without it the delta is +4.5 pts, CI −7.5…+16.4 — not distinguishable from zero.
+- Consumption: 706 `claude -p` calls, 4.1M input / 6.7M output tokens, ~1050 API-minutes
+  (≈ 3 h wall-clock at `--parallel 8`), on the claude.ai subscription.
+- Takeaway: the harness works end to end and reproduces the paper's *shape* (large LiveMath gain);
+  the size of the gain on this bench is not evidence of transferable reasoning skill. Next
+  signal-bearing runs: a bench without a structural shortcut (SpreadsheetBench), or LiveMath scored
+  on non-meta items only.
+
 ## Decisions (resolved 2026-07-01)
 1. **Embedder** — local ONNX bge-m3 int8 (reuse `scripts/embeddings`). Service-less.
 2. **Curator trigger** — **Stop-hook** (auto at session end). `/retro` stays as a manual entry point.
