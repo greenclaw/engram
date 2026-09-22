@@ -121,7 +121,7 @@ def _trace_block(t: Trace) -> str:
 
 
 def _log_role(log_to: Path | None, res: ClaudeResult) -> None:
-    """Raw Layer for the optimizer roles: what they returned, turns and cost (audit + budget)."""
+    """Raw Layer for the optimizer roles: what they returned, turns and the raw usage (audit + budget)."""
     if log_to is not None:
         log_to.parent.mkdir(parents=True, exist_ok=True)
         log_to.write_text(json.dumps({"cost_usd": res.cost_usd, "turns": res.turns, "is_error": res.is_error,

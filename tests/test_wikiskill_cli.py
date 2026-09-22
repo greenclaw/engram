@@ -59,6 +59,23 @@ def test_status_prints_history(tmp_path, capsys):
     assert "Accepted" in out and "0.500" in out
 
 
+def test_status_reports_tokens_not_usd(tmp_path, capsys):
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    (ws / "dataset/meta.json").write_text(json.dumps({"bench": "livemath", "seed": 0}))
+    (ws / "raw/iter-1").mkdir(parents=True)
+    (ws / "raw/iter-1/t0.json").write_text(json.dumps({"raw": {
+        "usage": {"input_tokens": 1000, "output_tokens": 8000}, "duration_api_ms": 60_000, "total_cost_usd": 0.04}}))
+    (ws / "state.json").write_text(json.dumps({"iteration": 1, "r_best": 0.5, "stopped": False, "history": [
+        {"k": 1, "action": "create", "name": "s", "r_val": 0.5, "r_best": 0.5, "outcome": "Accepted",
+         "cost_usd": 3.24}]}))  # a history written by the old code must still render
+    assert wcli.run_evolve(argparse.Namespace(evolve_cmd="status", ws=str(ws))) == 0
+    out = capsys.readouterr().out
+    assert "calls" in out and "out_tok" in out and "8000" in out and "1.0" in out  # 1 call, 8000 out, 1.0 api min
+    assert "usd" not in out.lower() and "3.24" not in out and "0.04" not in out
+    assert "total" in out
+
+
 def test_eval_resolves_skills_dir(monkeypatch, tmp_path, capsys):
     ws = tmp_path / "ws"
     w.init_workspace(ws)

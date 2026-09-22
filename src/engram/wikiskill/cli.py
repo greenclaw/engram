@@ -6,7 +6,14 @@ import sys
 from pathlib import Path
 
 from engram.wikiskill.bench import LiveMath, get_bench, make_splits, write_split
-from engram.wikiskill.loop import EvolveError, evaluate, evolve, load_state
+from engram.wikiskill.loop import (
+    EvolveError,
+    evaluate,
+    evolve,
+    iteration_usage,
+    load_state,
+    usage_of,
+)
 from engram.wikiskill.workspace import commit_all, init_workspace
 
 
@@ -72,8 +79,15 @@ def run_evolve(args) -> int:
         return 0
     st = load_state(ws)  # status
     print(f"bench={_meta(ws)['bench']} iteration={st['iteration']} R_best={st['r_best']} stopped={st['stopped']}")
-    print("k\taction\tskill\tval\tbest\toutcome\tcost_usd")
+    print("k\taction\tskill\tval\tbest\toutcome\tcalls\tin_tok\tout_tok\tapi_min")
     for h in st["history"]:
         val = "n/a" if h["r_val"] is None else f"{h['r_val']:.3f}"
-        print(f"{h['k']}\t{h['action']}\t{h['name']}\t{val}\t{h['r_best']:.3f}\t{h['outcome']}\t{h.get('cost_usd', 0.0):.3f}")
+        u = iteration_usage(ws, h["k"])  # from raw/, so histories written before usage tracking still render
+        print(f"{h['k']}\t{h['action']}\t{h['name']}\t{val}\t{h['r_best']:.3f}\t{h['outcome']}\t{_usage_cols(u)}")
+    t = usage_of(sorted((ws / "raw").rglob("*.json")))
+    print(f"total (all raw/ incl. baseline and evals)\t\t\t\t\t\t{_usage_cols(t)}")
     return 0
+
+
+def _usage_cols(u: dict) -> str:
+    return f"{u['calls']}\t{u['input_tokens']}\t{u['output_tokens']}\t{u['api_seconds'] / 60:.1f}"

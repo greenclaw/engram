@@ -52,13 +52,29 @@ def _fmt(x: float | None) -> str:
     return "n/a" if x is None else f"{x:.3f}"
 
 
-def iteration_cost(ws: Path, k: int) -> float:
-    """USD spent in iteration k: train + val traces and the Maintainer/Proposer role logs.
-    Error diagnostics are excluded (a failed call re-rolls; its retry is the counted one)."""
-    files = [*(ws / f"raw/iter-{k}").glob("*.json"), *(ws / f"raw/val-{k}").glob("*.json"),
-             *(ws / "raw/roles").glob(f"iter-{k}-*.json")]
-    return sum(float(json.loads(f.read_text()).get("cost_usd", 0.0))
-               for f in files if not f.name.endswith(".error.json"))
+def usage_of(files) -> dict:
+    """Consumption of the claude calls recorded in `files` (trace or role logs): calls, input tokens
+    (uncached + cache write + cache read), output tokens, API seconds. Deliberately not USD: on a
+    subscription `total_cost_usd` is an API-equivalent estimate, not a charge — the constraint is
+    usage limits, which track tokens. Error diagnostics are skipped (the retry is the counted call)."""
+    u = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "api_seconds": 0.0}
+    for f in files:
+        if f.name.endswith(".error.json"):
+            continue
+        raw = json.loads(f.read_text()).get("raw") or {}
+        t = raw.get("usage") or {}
+        u["calls"] += 1
+        u["input_tokens"] += sum(int(t.get(key, 0)) for key in
+                                 ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+        u["output_tokens"] += int(t.get("output_tokens", 0))
+        u["api_seconds"] += float(raw.get("duration_api_ms", 0)) / 1000
+    return u
+
+
+def iteration_usage(ws: Path, k: int) -> dict:
+    """usage_of iteration k: train + val traces and the Maintainer/Proposer role logs."""
+    return usage_of([*(ws / f"raw/iter-{k}").glob("*.json"), *(ws / f"raw/val-{k}").glob("*.json"),
+                     *(ws / "raw/roles").glob(f"iter-{k}-*.json")])
 
 
 def _baseline(ws: Path, bench: Bench, st: dict, val: list, *, model: str, parallel: int, log) -> None:
@@ -132,7 +148,7 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
             else:
                 restore_skills(ws, _last_accepted(st))  # line 17: skills only, wiki retained
                 entry["outcome"] = "Rejected"
-        entry["r_val"], entry["r_best"], entry["cost_usd"] = r_val, st["r_best"], iteration_cost(ws, k)
+        entry["r_val"], entry["r_best"], entry["usage"] = r_val, st["r_best"], iteration_usage(ws, k)
         append_impact(ws, k, p, diff, r_val, st["r_best"], entry["outcome"])  # line 19
         st.pop("pending", None)
         st["history"].append(entry)
