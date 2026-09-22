@@ -81,9 +81,9 @@ to `wiki/log.md` — the wiki is never corrupted by a bad patch. Then it revises
 `index.md`, appends to `log.md`, commits.
 
 **Skill Proposer** (§3.2.3, Eq. 3). One ReAct agent per iteration:
-`claude -p` with cwd = workspace, `--tools Read`, bounded by
-`--max-budget-usd` (this `claude` build has no `--max-turns`; the paper's
-runs use 10–20 ReAct turns). System prompt = E.3 verbatim except path aliases (see
+`claude -p` with cwd = workspace, `--tools Read`, `--max-turns 25` (paper:
+10–20 ReAct turns; the flag is accepted by `claude` 2.1.278 though absent from
+its `--help`). System prompt = E.3 verbatim except path aliases (see
 Deviations). Initial user message = `wiki/index.md` + `wiki/skill-impact.md` +
 a summary of all train outcomes (`id, pass/fail, prediction, gold`). The agent
 reads pattern pages and `raw/iter-k/<id>.json` on demand. Final answer via
