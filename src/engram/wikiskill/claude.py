@@ -34,7 +34,10 @@ def run_claude(prompt: str, *, system: str, model: str, cwd: Path, tools: list[s
     if json_schema is not None:
         argv += ["--json-schema", json.dumps(json_schema)]
     argv.append(prompt)
-    out = _exec(argv, cwd, timeout)
+    try:
+        out = _exec(argv, cwd, timeout)
+    except subprocess.TimeoutExpired:  # a hung call is a retryable failure, not a crash of the whole rollout
+        return ClaudeResult(text=f"timeout after {timeout}s", structured=None, turns=0, cost_usd=0.0, is_error=True)
     try:
         d = json.loads(out)
     except json.JSONDecodeError:  # not-logged-in / crash banners are plain text

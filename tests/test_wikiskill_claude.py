@@ -45,6 +45,17 @@ def test_argv_tools_schema_turns(monkeypatch, tmp_path):
     assert r.structured == {"action": "x"}
 
 
+def test_timeout_is_error_not_exception(monkeypatch, tmp_path):
+    import subprocess
+
+    def slow(argv, cwd, timeout):
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(c, "_exec", slow)
+    r = c.run_claude("hi", system="S", model="haiku", cwd=tmp_path, tools=[], timeout=7)
+    assert r.is_error and "timeout after 7s" in r.text
+
+
 def test_non_json_stdout_is_error(monkeypatch, tmp_path):
     monkeypatch.setattr(c, "_exec", lambda argv, cwd, timeout: "Not logged in")
     r = c.run_claude("hi", system="S", model="haiku", cwd=tmp_path, tools=[])

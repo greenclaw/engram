@@ -111,7 +111,8 @@ def test_reject_rolls_back_skills_keeps_wiki(monkeypatch, tmp_path):
     assert "accepted-0" in w.git(ws, "tag")
     # the rejected iter-1 commit carries an empty skills/ (rolled back before the commit)
     assert "SKILL.md" not in w.git(ws, "ls-tree", "-r", "--name-only", "accepted-0")
-    assert "SKILL.md" not in w.git(ws, "ls-tree", "-r", "--name-only", "HEAD~1")
+    rejected = w.git(ws, "log", "--format=%H", "--grep", "^iter 1: Rejected").split()
+    assert len(rejected) == 1 and "SKILL.md" not in w.git(ws, "ls-tree", "-r", "--name-only", rejected[0])
 
 
 def test_strict_gate_equal_is_rejected(monkeypatch, tmp_path):
@@ -171,15 +172,19 @@ def test_maintainer_error_aborts_iteration_cleanly(monkeypatch, tmp_path):
 
 
 def test_crash_after_apply_does_not_leak_candidate_into_next_run(monkeypatch, tmp_path):
-    """Val rollout dies after the candidate skill was written: on resume the iteration restarts
-    from S_{k-1} (skills restored from the last accepted tag), not from the un-gated candidate."""
+    """Val rollout dies after the candidate skill was written: on resume the train rollout runs on
+    S_{k-1} (skills restored from the last accepted tag), not on the un-gated candidate, and the
+    stored proposal is re-applied and gated instead of asking the Proposer again."""
     ws = _ws(tmp_path)
     it = _wire(monkeypatch, val_scores=[0.5, 0.5], proposals=[CREATE, {"action": "no_action"}])
     real_rollout = L.rollout
     seen_train_skills = []
 
+    crashed = {"done": False}
+
     def dying_rollout(bench, ws_, tasks, *, skills_text, model, parallel, out_dir):
-        if out_dir.name == "val-1":
+        if out_dir.name == "val-1" and not crashed["done"]:
+            crashed["done"] = True
             raise r.RoleError("2 of 2 rollouts failed")
         if out_dir.name.startswith("iter-"):
             seen_train_skills.append(skills_text)
@@ -192,8 +197,83 @@ def test_crash_after_apply_does_not_leak_candidate_into_next_run(monkeypatch, tm
     assert (ws / "skills/s1/SKILL.md").exists()  # the crash left the candidate on disk
     assert L.load_state(ws)["iteration"] == 0
     L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    st = L.load_state(ws)
     assert seen_train_skills == ["", ""]  # both attempts trained on S_0, never on the candidate
-    assert not (ws / "skills/s1").exists() and it["prop"] == 2
+    assert it["prop"] == 1 and [h["outcome"] for h in st["history"]] == ["Rejected"]  # 0.5 is not > 0.5
+    assert not (ws / "skills/s1").exists()
+
+
+def test_resume_after_val_crash_does_not_rerun_maintainer_or_proposer(monkeypatch, tmp_path):
+    """Val rollout fails loud mid-iteration; the re-run must reuse the persisted Maintainer step and
+    the stored proposal — a second Maintainer pass would apply the same traces to the wiki twice."""
+    ws = _ws(tmp_path)
+    it = _wire(monkeypatch, val_scores=[0.5, 1.0], proposals=[CREATE])
+    calls = {"maintain": 0}
+    real_maintain = L.maintain
+
+    def counting_maintain(ws_, sample, *, model, **kw):
+        calls["maintain"] += 1
+        return real_maintain(ws_, sample, model=model, **kw)
+
+    monkeypatch.setattr(L, "maintain", counting_maintain)
+    real_rollout, crashed = L.rollout, {"done": False}
+
+    def crash_once(bench, ws_, tasks, *, skills_text, model, parallel, out_dir):
+        if out_dir.name == "val-1" and not crashed["done"]:
+            crashed["done"] = True
+            raise r.RoleError("1 of 2 rollouts failed")
+        return real_rollout(bench, ws_, tasks, skills_text=skills_text, model=model, parallel=parallel,
+                            out_dir=out_dir)
+
+    monkeypatch.setattr(L, "rollout", crash_once)
+    with pytest.raises(r.RoleError):
+        L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    st = L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    assert calls["maintain"] == 1 and it["prop"] == 1
+    assert [h["outcome"] for h in st["history"]] == ["Accepted"] and "pending" not in st
+    assert (ws / "wiki/log.md").read_text().count("## iter 1") == 1
+    assert (ws / "skills/s1/SKILL.md").exists()
+
+
+def test_crash_after_accept_before_state_leaves_a_valid_tag(monkeypatch, tmp_path):
+    """The accepted-k tag must exist before state.json records the acceptance, otherwise the next
+    iteration's restore points at a missing tag."""
+    ws = _ws(tmp_path)
+    _wire(monkeypatch, val_scores=[0.25, 0.5, 0.5, 0.75], proposals=[CREATE, PATCH])
+    real_impact, boom = L.append_impact, {"armed": True}
+
+    def impact_crash(ws_, k, p, *a, **kw):
+        if boom["armed"] and k == 1:
+            boom["armed"] = False
+            raise OSError("disk full")
+        return real_impact(ws_, k, p, *a, **kw)
+
+    monkeypatch.setattr(L, "append_impact", impact_crash)
+    with pytest.raises(OSError):
+        L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    st = L.evolve(ws, FakeBench(), model="m", iters=2, parallel=1, **QUIET)
+    assert [h["outcome"] for h in st["history"]][0] == "Accepted"
+    assert "accepted-1" in w.git(ws, "tag")
+
+
+def test_evaluate_cache_is_keyed_by_skill_content(monkeypatch, tmp_path):
+    """No-skill eval → evolve → eval must not reuse the no-skill traces (same split, new skills)."""
+    ws = _ws(tmp_path)
+    dirs = []
+
+    def fake_rollout(bench, ws_, tasks, *, skills_text, model, parallel, out_dir):
+        dirs.append(out_dir.name)
+        return [{"id": t["id"], "split": "test", "prompt": "", "response": "A", "answer": "A",
+                 "gold": "A", "score": 1.0, "cost_usd": 0} for t in tasks]
+
+    monkeypatch.setattr(L, "rollout", fake_rollout)
+    L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1)
+    (ws / "skills/s1").mkdir()
+    (ws / "skills/s1/SKILL.md").write_text("rule")
+    L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1)
+    L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1)
+    assert dirs[0] == "eval-test-self-noskill" and dirs[1] != dirs[0] and dirs[1] == dirs[2]
+    assert dirs[1].startswith("eval-test-self-")
 
 
 def test_evaluate_self_and_transfer(monkeypatch, tmp_path):
@@ -207,9 +287,9 @@ def test_evaluate_self_and_transfer(monkeypatch, tmp_path):
 
     monkeypatch.setattr(L, "rollout", fake_rollout)
     assert L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1) == 1.0
-    assert seen["skills"] == "" and seen["out"].name == "eval-test-self"
+    assert seen["skills"] == "" and seen["out"].name == "eval-test-self-noskill"
     other = tmp_path / "other/skills/z"
     other.mkdir(parents=True)
     (other / "SKILL.md").write_text("Z")
     L.evaluate(ws, FakeBench(), split="test", model="m", parallel=1, skills_dir=other.parent)
-    assert "Z" in seen["skills"] and seen["out"].name == "eval-test-other"
+    assert "Z" in seen["skills"] and seen["out"].name.startswith("eval-test-other-")

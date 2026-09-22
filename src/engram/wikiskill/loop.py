@@ -2,6 +2,7 @@
 git audit trail; the wiki is never rolled back. state.json makes every step resumable."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -56,34 +57,50 @@ def iteration_cost(ws: Path, k: int) -> float:
                for f in files if not f.name.endswith(".error.json"))
 
 
+def _baseline(ws: Path, bench: Bench, st: dict, val: list, *, model: str, parallel: int, log) -> None:
+    """Algorithm 1 line 3: R_best = R(val) with S_0 = ∅. Tag before recording, so a state.json that
+    names r_best always has its accepted-0 tag (a crash in between just re-reads the traces)."""
+    r = mean_score(rollout(bench, ws, val, skills_text="", model=model, parallel=parallel, out_dir=ws / "raw/val-0"))
+    commit_all(ws, "iter 0: baseline traces")
+    tag(ws, "accepted-0")
+    st["r_best"] = r
+    save_state(ws, st)
+    commit_all(ws, f"iter 0: baseline val {r:.3f}")
+    log(f"baseline R_best={r:.3f}")
+
+
 def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log=print) -> dict:
+    """Run Algorithm 1 up to iteration `iters`. Resumable at every step: traces resume from raw/,
+    and st["pending"] records a finished Maintainer step and the stored proposal of the running
+    iteration, so a crash (e.g. a failed val rollout) never re-applies the wiki or re-proposes."""
     train, val = read_split(ws / "dataset/train.jsonl"), read_split(ws / "dataset/val.jsonl")
     st = load_state(ws)
-    if st["r_best"] is None:  # line 3: baseline validation with S_0 = ∅
-        st["r_best"] = mean_score(rollout(bench, ws, val, skills_text="", model=model, parallel=parallel,
-                                          out_dir=ws / "raw/val-0"))
-        save_state(ws, st)
-        commit_all(ws, f"iter 0: baseline val {st['r_best']:.3f}")
-        tag(ws, "accepted-0")  # after the commit: a tag names the tree it must restore
-        log(f"baseline R_best={st['r_best']:.3f}")
+    if st["r_best"] is None:
+        _baseline(ws, bench, st, val, model=model, parallel=parallel, log=log)
+    roles = ws / "raw/roles"
     for k in range(st["iteration"] + 1, iters + 1):
         if st["r_best"] >= 1.0:  # line 5: early stop
             st["stopped"] = True
             save_state(ws, st)
             log("R_best = 1.0 — early stop")
             break
+        pend = st.get("pending") if (st.get("pending") or {}).get("k") == k else None
         restore_skills(ws, _last_accepted(st))  # S_{k-1} exactly, even after a crash mid-iteration
         traces = rollout(bench, ws, train, skills_text=skill_section(ws), model=model, parallel=parallel,
                          out_dir=ws / f"raw/iter-{k}")  # line 8
         log(f"iter {k}: train R={mean_score(traces):.3f}")
-        roles = ws / "raw/roles"
-        skipped = apply_maintainer(ws, maintain(ws, sample_traces(traces), model=model,
-                                                log_to=roles / f"iter-{k}-maintainer.json"), k)  # lines 9–10
-        commit_all(ws, f"iter {k}: wiki" + (f" ({len(skipped)} patches skipped)" if skipped else ""))
+        if pend is None:
+            out = maintain(ws, sample_traces(traces), model=model, log_to=roles / f"iter-{k}-maintainer.json")
+            skipped = apply_maintainer(ws, out, k)  # lines 9–10
+            pend = st["pending"] = {"k": k, "proposal": None}
+            save_state(ws, st)
+            commit_all(ws, f"iter {k}: wiki" + (f" ({len(skipped)} patches skipped)" if skipped else ""))
         entry = {"k": k, "action": None, "name": None, "r_val": None, "r_best": st["r_best"], "outcome": None}
         p, diff, r_val = {"action": "invalid", "name": ""}, "", None
         try:
-            p = propose(ws, k, traces, model=model, log_to=roles / f"iter-{k}-proposer.json")  # line 11
+            p = pend["proposal"] or propose(ws, k, traces, model=model, log_to=roles / f"iter-{k}-proposer.json")
+            pend["proposal"] = p  # line 11 — stored, so a crash below never re-proposes
+            save_state(ws, st)
             entry["action"], entry["name"] = p.get("action"), p.get("name")
             if p["action"] == "no_action":
                 entry["outcome"] = "NoAction"
@@ -97,6 +114,8 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
             r_val = mean_score(rollout(bench, ws, val, skills_text=skill_section(ws), model=model,
                                        parallel=parallel, out_dir=ws / f"raw/val-{k}"))  # line 13
             if r_val > st["r_best"]:  # line 14: strict improvement
+                commit_all(ws, f"iter {k}: accept {p.get('name')}")
+                tag(ws, f"accepted-{k}")  # before state.json records it: the tag must exist and hold the skill
                 st["r_best"] = r_val
                 entry["outcome"] = "Accepted"
             else:
@@ -104,21 +123,23 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
                 entry["outcome"] = "Rejected"
         entry["r_val"], entry["r_best"], entry["cost_usd"] = r_val, st["r_best"], iteration_cost(ws, k)
         append_impact(ws, k, p, diff, r_val, st["r_best"], entry["outcome"])  # line 19
+        st.pop("pending", None)
         st["history"].append(entry)
         st["iteration"] = k
         save_state(ws, st)
         commit_all(ws, f"iter {k}: {entry['outcome']} val={_fmt(r_val)} best={st['r_best']:.3f}")
-        if entry["outcome"] == "Accepted":
-            tag(ws, f"accepted-{k}")  # after the commit: the tag must name a tree that holds the skill
         log(f"iter {k}: {entry['outcome']} val={_fmt(r_val)} best={st['r_best']:.3f}")
     return st
 
 
 def evaluate(ws: Path, bench: Bench, *, split: str, model: str, parallel: int,
              skills_dir: Path | None = None) -> float:
-    """R(T_split) for the active skills, or for another workspace's skills/ (Table 2 transfer)."""
+    """R(T_split) for the active skills, or for another workspace's skills/ (Table 2 transfer).
+    The trace cache is keyed by skill CONTENT: a later eval with evolved skills never reuses the
+    no-skill traces of an earlier eval of the same split."""
     tasks = read_split(ws / f"dataset/{split}.jsonl")
-    label = skills_dir.parent.name if skills_dir else "self"
+    source = skills_dir.parent.name if skills_dir else "self"
     skills = skills_dir_section(skills_dir) if skills_dir else skill_section(ws)
+    key = hashlib.sha1(skills.encode()).hexdigest()[:10] if skills else "noskill"
     return mean_score(rollout(bench, ws, tasks, skills_text=skills, model=model, parallel=parallel,
-                              out_dir=ws / f"raw/eval-{split}-{label}"))
+                              out_dir=ws / f"raw/eval-{split}-{source}-{key}"))

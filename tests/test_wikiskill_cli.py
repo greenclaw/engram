@@ -36,6 +36,18 @@ def test_init_writes_splits(monkeypatch, tmp_path):
     assert w.git(ws, "status", "--porcelain").strip() == ""
 
 
+def test_init_refuses_existing_workspace(monkeypatch, tmp_path, capsys):
+    recs = [{"no": i, "month": "202606", "mcq": {"question": f"q{i}", "correct_choice": {"label": "A", "text": "r"},
+             "choices": [{"label": lab, "text": "d"} for lab in "BCDE"]}} for i in range(200)]
+    monkeypatch.setattr(wcli.LiveMath, "download_records", lambda self, cache_dir: recs)
+    ws = tmp_path / "ws"
+    assert wcli.run_evolve(argparse.Namespace(evolve_cmd="init", ws=str(ws), bench="livemath", seed=0)) == 0
+    before = (ws / "dataset/train.jsonl").read_text()
+    assert wcli.run_evolve(argparse.Namespace(evolve_cmd="init", ws=str(ws), bench="livemath", seed=1)) == 2
+    assert (ws / "dataset/train.jsonl").read_text() == before
+    assert "already initialized" in capsys.readouterr().err
+
+
 def test_status_prints_history(tmp_path, capsys):
     ws = tmp_path / "ws"
     w.init_workspace(ws)

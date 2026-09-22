@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from engram.wikiskill.bench import LiveMath, get_bench, make_splits, write_split
@@ -38,6 +39,9 @@ def _meta(ws: Path) -> dict:
 def run_evolve(args) -> int:
     ws = Path(args.ws)
     if args.evolve_cmd == "init":
+        if (ws / "dataset/meta.json").exists():  # a new split under an existing state.json would silently mix runs
+            print(f"engram evolve: {ws} is already initialized; use a new --ws for a new split", file=sys.stderr)
+            return 2
         init_workspace(ws)
         bench = LiveMath()
         (ws / ".gitignore").write_text(".hf-cache/\n")
