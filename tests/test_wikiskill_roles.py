@@ -137,6 +137,26 @@ def test_propose_prompt_and_result(monkeypatch, tmp_path):
     assert "Rejected" in seen["prompt"] and "t0\tFAIL\tpred=A\tgold=B" in seen["prompt"] and "t1\tPASS" in seen["prompt"]
 
 
+def test_propose_is_conditioned_on_active_skills(monkeypatch, tmp_path):
+    """Eq. 3: P_k ← M_P(W'_k, S_{k-1}, T_train). Live smoke: without S_{k-1} in the prompt the Proposer
+    inferred the skill set from skill-impact.md and patched a skill that had been rolled back."""
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    seen = []
+
+    def fake(prompt, **kw):
+        seen.append(prompt)
+        return ClaudeResult(text="", structured={"action": "no_action"}, turns=1, cost_usd=0, is_error=False)
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    r.propose(ws, 1, [], model="m")
+    assert "# Active skills (S_{k-1})" in seen[0] and "none — the skill set is empty" in seen[0]
+    (ws / "skills/kept").mkdir()
+    (ws / "skills/kept/SKILL.md").write_text("KEEP-RULE")
+    r.propose(ws, 2, [], model="m")
+    assert "### kept" in seen[1] and "KEEP-RULE" in seen[1] and "none — the skill set is empty" not in seen[1]
+
+
 def test_propose_missing_structured_raises(monkeypatch, tmp_path):
     ws = tmp_path / "ws"
     w.init_workspace(ws)

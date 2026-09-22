@@ -10,7 +10,7 @@ from typing import TypedDict
 
 from engram.wikiskill.bench import Bench, Task
 from engram.wikiskill.claude import ClaudeResult, run_claude
-from engram.wikiskill.workspace import read_wiki
+from engram.wikiskill.workspace import read_wiki, skill_section
 
 PROMPTS = Path(__file__).parent / "prompts"
 _EDIT = {"type": "object", "properties": {"op": {"type": "string", "enum": ["append", "replace", "insert_after"]},
@@ -154,8 +154,10 @@ def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int
     """Eq. 3: a ReAct agent over the wiki index, the impact tracker and the train outcomes; it
     reads pattern pages and raw traces itself and ends with one atomic proposal."""
     system = (PROMPTS / "proposer.md").read_text().replace("{iter}", str(k)).replace("{task_desc}", task_desc)
+    active = skill_section(ws) or "(none — the skill set is empty; only `create` or `no_action` apply)\n"
     prompt = (f"# wiki/index.md\n\n{(ws / 'wiki/index.md').read_text()}\n\n"
               f"# wiki/skill-impact.md\n\n{(ws / 'wiki/skill-impact.md').read_text()}\n\n"
+              f"# Active skills (S_{{k-1}})\n\n{active}\n"
               f"# Training outcomes (iteration {k})\n\n{outcome_summary(traces)}\n")
     res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"],
                      max_turns=max_turns, json_schema=PROPOSER_SCHEMA)
