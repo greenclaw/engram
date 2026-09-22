@@ -79,13 +79,23 @@ def _safe_md_name(name: str) -> str:
     return base + ".md"
 
 
+def _unescape(s) -> str:
+    """Undo one level of JSON escaping the model sometimes applies twice to a string field (seen live:
+    index.md as one line of literal \\n and \\"). Only a value with NO real newline is touched, so
+    genuine multi-line text keeps any literal backslashes (LaTeX, code)."""
+    s = str(s)
+    if "\n" in s or not any(esc in s for esc in ("\\n", '\\"', "\\t")):
+        return s
+    return s.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+
+
 def apply_maintainer(ws: Path, out: dict, k: int) -> list[str]:
     """Apply one Maintainer output (Eq. 2): create/patch patterns, rewrite index.md, append log.md.
     Returns the skipped patches; they are also recorded in log.md so nothing is lost silently."""
     patterns, skipped = ws / "wiki/patterns", []
     for c in out.get("create_patterns") or []:
         try:
-            (patterns / _safe_md_name(str(c["name"]))).write_text(str(c["content"]))
+            (patterns / _safe_md_name(str(c["name"]))).write_text(_unescape(c["content"]))
         except (ProposalError, KeyError) as e:
             skipped.append(f"create_patterns: {e}")
     for u in out.get("update_patterns") or []:
@@ -97,12 +107,14 @@ def apply_maintainer(ws: Path, out: dict, k: int) -> list[str]:
         if not p.is_file():
             skipped.append(f"update_patterns: no such pattern {p.name}")
             continue
-        text, sk = apply_edits(p.read_text(), u.get("edits") or [])
+        edits = [{**e, **{f: _unescape(e[f]) for f in ("target", "content") if f in e}}
+                 for e in u.get("edits") or []]
+        text, sk = apply_edits(p.read_text(), edits)
         p.write_text(text)
         skipped += [f"{p.name}: {s}" for s in sk]
     if out.get("update_index"):
-        (ws / "wiki/index.md").write_text(str(out["update_index"]).rstrip() + "\n")
-    entry = f"## iter {k}\n\n{str(out.get('append_log', '')).strip()}\n"
+        (ws / "wiki/index.md").write_text(_unescape(out["update_index"]).rstrip() + "\n")
+    entry = f"## iter {k}\n\n{_unescape(out.get('append_log', '')).strip()}\n"
     if skipped:
         entry += "\nSkipped patches:\n" + "".join(f"- {s}\n" for s in skipped)
     with (ws / "wiki/log.md").open("a") as f:

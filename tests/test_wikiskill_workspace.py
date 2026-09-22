@@ -58,6 +58,26 @@ def test_apply_maintainer(tmp_path):
     assert skipped and "missing.md" in skipped[0]
 
 
+def test_apply_maintainer_undoes_double_escaped_strings(tmp_path):
+    """Live smoke: Haiku sometimes JSON-escapes a string field twice, so index.md arrived as one line
+    with literal \\n and \\". A single-line value with escape sequences is decoded once; real text is untouched."""
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    (ws / "wiki/patterns/p.md").write_text("x\n")
+    w.apply_maintainer(ws, {
+        "create_patterns": [{"name": "q.md", "content": "# Q\\n\\nbody \\\"quoted\\\""}],
+        "update_patterns": [{"name": "p.md", "edits": [{"op": "append", "content": "line1\\nline2"}]}],
+        "update_index": "## Idx\\n\\n- [a](wiki/patterns/a.md): \\\"fix\\\"",
+        "append_log": "found it\\nsecond line"}, k=1)
+    assert (ws / "wiki/index.md").read_text() == '## Idx\n\n- [a](wiki/patterns/a.md): "fix"\n'
+    assert "found it\nsecond line" in (ws / "wiki/log.md").read_text()
+    assert (ws / "wiki/patterns/q.md").read_text() == '# Q\n\nbody "quoted"'
+    assert (ws / "wiki/patterns/p.md").read_text() == "x\nline1\nline2\n"
+    # multi-line values are real text: a literal backslash-n inside them (e.g. LaTeX) is kept
+    w.apply_maintainer(ws, {"update_index": "## Idx\n- uses \\n in C", "append_log": "l"}, k=2)
+    assert (ws / "wiki/index.md").read_text() == "## Idx\n- uses \\n in C\n"
+
+
 def test_apply_maintainer_rejects_bad_pattern_name(tmp_path):
     ws = tmp_path / "ws"
     w.init_workspace(ws)
