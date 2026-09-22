@@ -64,8 +64,8 @@ def run_evolve(args) -> int:
         return 0
     st = load_state(ws)  # status
     print(f"bench={_meta(ws)['bench']} iteration={st['iteration']} R_best={st['r_best']} stopped={st['stopped']}")
-    print("k\taction\tskill\tval\tbest\toutcome")
+    print("k\taction\tskill\tval\tbest\toutcome\tcost_usd")
     for h in st["history"]:
         val = "n/a" if h["r_val"] is None else f"{h['r_val']:.3f}"
-        print(f"{h['k']}\t{h['action']}\t{h['name']}\t{val}\t{h['r_best']:.3f}\t{h['outcome']}")
+        print(f"{h['k']}\t{h['action']}\t{h['name']}\t{val}\t{h['r_best']:.3f}\t{h['outcome']}\t{h.get('cost_usd', 0.0):.3f}")
     return 0

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from engram.wikiskill import loop as L
@@ -51,14 +53,14 @@ def _wire(monkeypatch, val_scores, proposals, maint=None):
                         "gold": "A", "score": bench.score(t, resp), "cost_usd": 0.0})
         return trs
 
-    def fake_propose(ws, k, traces, *, model, max_turns=25, task_desc=""):
+    def fake_propose(ws, k, traces, *, model, **kw):
         p = proposals[it["prop"]]
         it["prop"] += 1
         return p
 
     monkeypatch.setattr(L, "rollout", fake_rollout)
     monkeypatch.setattr(L, "propose", fake_propose)
-    monkeypatch.setattr(L, "maintain", maint or (lambda ws, sample, *, model: {
+    monkeypatch.setattr(L, "maintain", maint or (lambda ws, sample, *, model, **kw: {
         "create_patterns": [{"name": "p.md", "content": "pat"}], "update_patterns": [],
         "update_index": "# idx\n- p", "append_log": "found p"}))
     return it
@@ -84,6 +86,18 @@ def test_gate_accept_and_early_stop(monkeypatch, tmp_path):
     assert "skills/s1/SKILL.md" in w.git(ws, "ls-tree", "-r", "--name-only", "accepted-1")
     assert (ws / "wiki/patterns/p.md").exists() and "found p" in (ws / "wiki/log.md").read_text()
     assert (ws / "raw/val-0").is_dir() and (ws / "raw/iter-1").is_dir() and (ws / "raw/val-1").is_dir()
+    assert st["history"][0]["cost_usd"] == 0.0  # fakes cost nothing; real runs sum traces + role logs
+
+
+def test_iteration_cost_sums_traces_and_role_logs(tmp_path):
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    for rel, cost in (("raw/iter-2/t0.json", 0.01), ("raw/iter-2/t1.json", 0.02), ("raw/val-2/v0.json", 0.03),
+                      ("raw/roles/iter-2-maintainer.json", 0.1), ("raw/roles/iter-2-proposer.json", 0.2),
+                      ("raw/iter-3/t0.json", 9.0), ("raw/iter-2/t2.error.json", 9.0)):
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text(json.dumps({"cost_usd": cost}))
+    assert round(L.iteration_cost(ws, 2), 6) == 0.36
 
 
 def test_reject_rolls_back_skills_keeps_wiki(monkeypatch, tmp_path):
@@ -135,7 +149,7 @@ def test_role_error_is_invalid_not_crash(monkeypatch, tmp_path):
     ws = _ws(tmp_path)
     _wire(monkeypatch, val_scores=[0.5], proposals=[])
 
-    def boom(ws, k, traces, *, model, max_turns=25, task_desc=""):
+    def boom(ws, k, traces, *, model, **kw):
         raise r.RoleError("no output")
 
     monkeypatch.setattr(L, "propose", boom)
@@ -146,7 +160,7 @@ def test_role_error_is_invalid_not_crash(monkeypatch, tmp_path):
 def test_maintainer_error_aborts_iteration_cleanly(monkeypatch, tmp_path):
     ws = _ws(tmp_path)
 
-    def boom(ws, sample, *, model):
+    def boom(ws, sample, *, model, **kw):
         raise r.RoleError("no wiki output")
 
     _wire(monkeypatch, val_scores=[0.5], proposals=[CREATE], maint=boom)

@@ -47,6 +47,15 @@ def _fmt(x: float | None) -> str:
     return "n/a" if x is None else f"{x:.3f}"
 
 
+def iteration_cost(ws: Path, k: int) -> float:
+    """USD spent in iteration k: train + val traces and the Maintainer/Proposer role logs.
+    Error diagnostics are excluded (a failed call re-rolls; its retry is the counted one)."""
+    files = [*(ws / f"raw/iter-{k}").glob("*.json"), *(ws / f"raw/val-{k}").glob("*.json"),
+             *(ws / "raw/roles").glob(f"iter-{k}-*.json")]
+    return sum(float(json.loads(f.read_text()).get("cost_usd", 0.0))
+               for f in files if not f.name.endswith(".error.json"))
+
+
 def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log=print) -> dict:
     train, val = read_split(ws / "dataset/train.jsonl"), read_split(ws / "dataset/val.jsonl")
     st = load_state(ws)
@@ -67,12 +76,14 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
         traces = rollout(bench, ws, train, skills_text=skill_section(ws), model=model, parallel=parallel,
                          out_dir=ws / f"raw/iter-{k}")  # line 8
         log(f"iter {k}: train R={mean_score(traces):.3f}")
-        skipped = apply_maintainer(ws, maintain(ws, sample_traces(traces), model=model), k)  # lines 9–10
+        roles = ws / "raw/roles"
+        skipped = apply_maintainer(ws, maintain(ws, sample_traces(traces), model=model,
+                                                log_to=roles / f"iter-{k}-maintainer.json"), k)  # lines 9–10
         commit_all(ws, f"iter {k}: wiki" + (f" ({len(skipped)} patches skipped)" if skipped else ""))
         entry = {"k": k, "action": None, "name": None, "r_val": None, "r_best": st["r_best"], "outcome": None}
         p, diff, r_val = {"action": "invalid", "name": ""}, "", None
         try:
-            p = propose(ws, k, traces, model=model)  # line 11
+            p = propose(ws, k, traces, model=model, log_to=roles / f"iter-{k}-proposer.json")  # line 11
             entry["action"], entry["name"] = p.get("action"), p.get("name")
             if p["action"] == "no_action":
                 entry["outcome"] = "NoAction"
@@ -91,7 +102,7 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
             else:
                 restore_skills(ws, _last_accepted(st))  # line 17: skills only, wiki retained
                 entry["outcome"] = "Rejected"
-        entry["r_val"], entry["r_best"] = r_val, st["r_best"]
+        entry["r_val"], entry["r_best"], entry["cost_usd"] = r_val, st["r_best"], iteration_cost(ws, k)
         append_impact(ws, k, p, diff, r_val, st["r_best"], entry["outcome"])  # line 19
         st["history"].append(entry)
         st["iteration"] = k

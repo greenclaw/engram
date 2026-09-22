@@ -97,6 +97,19 @@ def test_maintain_builds_prompt_and_validates(monkeypatch, tmp_path):
     assert seen["schema"] is r.MAINTAINER_SCHEMA
 
 
+def test_roles_log_raw_result_with_cost(monkeypatch, tmp_path):
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    outs = iter([{"update_index": "# i", "append_log": "l"}, {"action": "no_action"}])
+    monkeypatch.setattr(r, "run_claude", lambda *a, **k: ClaudeResult(
+        text="t", structured=next(outs), turns=4, cost_usd=0.02, is_error=False, raw={"total_cost_usd": 0.02}))
+    r.maintain(ws, [], model="m", log_to=ws / "raw/roles/iter-1-maintainer.json")
+    r.propose(ws, 1, [], model="m", log_to=ws / "raw/roles/iter-1-proposer.json")
+    for role in ("maintainer", "proposer"):
+        d = json.loads((ws / f"raw/roles/iter-1-{role}.json").read_text())
+        assert d["cost_usd"] == 0.02 and d["turns"] == 4 and d["structured"]
+
+
 def test_maintain_missing_structured_raises(monkeypatch, tmp_path):
     ws = tmp_path / "ws"
     w.init_workspace(ws)

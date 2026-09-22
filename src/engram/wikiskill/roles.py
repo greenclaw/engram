@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from engram.wikiskill.bench import Bench, Task
-from engram.wikiskill.claude import run_claude
+from engram.wikiskill.claude import ClaudeResult, run_claude
 from engram.wikiskill.workspace import read_wiki
 
 PROMPTS = Path(__file__).parent / "prompts"
@@ -120,12 +120,22 @@ def _trace_block(t: Trace) -> str:
             f"#### Prompt\n{t['prompt']}\n#### Agent output\n{t['response']}\n")
 
 
-def maintain(ws: Path, sample: list[Trace], *, model: str) -> dict:
+def _log_role(log_to: Path | None, res: ClaudeResult) -> None:
+    """Raw Layer for the optimizer roles: what they returned, turns and cost (audit + budget)."""
+    if log_to is not None:
+        log_to.parent.mkdir(parents=True, exist_ok=True)
+        log_to.write_text(json.dumps({"cost_usd": res.cost_usd, "turns": res.turns, "is_error": res.is_error,
+                                      "structured": res.structured, "text": res.text, "raw": res.raw},
+                                     ensure_ascii=False, indent=1))
+
+
+def maintain(ws: Path, sample: list[Trace], *, model: str, log_to: Path | None = None) -> dict:
     """Eq. 2: one call over the sampled traces + the full current wiki."""
     prompt = ("# Execution traces\n\n" + "\n".join(_trace_block(t) for t in sample)
               + "\n\n# Current wiki\n\n" + read_wiki(ws))
     res = run_claude(prompt, system=(PROMPTS / "maintainer.md").read_text(), model=model, cwd=ws,
                      tools=[], json_schema=MAINTAINER_SCHEMA)
+    _log_role(log_to, res)
     out = res.structured
     if not isinstance(out, dict) or "update_index" not in out:
         raise RoleError(f"maintainer returned no structured output: {res.text[:200]!r}")
@@ -140,7 +150,7 @@ def outcome_summary(traces: list[Trace]) -> str:
 
 
 def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int = 25,
-            task_desc: str = "multiple-choice mathematics questions") -> dict:
+            task_desc: str = "multiple-choice mathematics questions", log_to: Path | None = None) -> dict:
     """Eq. 3: a ReAct agent over the wiki index, the impact tracker and the train outcomes; it
     reads pattern pages and raw traces itself and ends with one atomic proposal."""
     system = (PROMPTS / "proposer.md").read_text().replace("{iter}", str(k)).replace("{task_desc}", task_desc)
@@ -149,6 +159,7 @@ def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int
               f"# Training outcomes (iteration {k})\n\n{outcome_summary(traces)}\n")
     res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"],
                      max_turns=max_turns, json_schema=PROPOSER_SCHEMA)
+    _log_role(log_to, res)
     if not isinstance(res.structured, dict) or "action" not in res.structured:
         raise RoleError(f"proposer returned no structured output: {res.text[:200]!r}")
     return res.structured
