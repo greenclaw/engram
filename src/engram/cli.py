@@ -55,7 +55,16 @@ def main(argv=None) -> int:
                      help="auto-approve iff every change's confidence ≥ TAU and no body-UPDATE "
                           "(bench-calibrated, μ−Zσ); otherwise fall back to the interactive gate")
 
+    from engram.wikiskill.cli import add_evolve_parser
+
+    add_evolve_parser(sub)
+
     args = p.parse_args(argv)
+
+    if args.cmd == "evolve":  # its own workspace (--ws), never the memory store
+        from engram.wikiskill import cli as wcli
+
+        return wcli.run_evolve(args)
 
     # ENGRAM_DISABLE kill switch: silences the ambient hook entrypoints only (recall hook +
     # Stop-hook enqueue) — instant rollback without editing settings or restarting sessions.
