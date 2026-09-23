@@ -124,8 +124,8 @@ def _log_role(log_to: Path | None, res: ClaudeResult) -> None:
     """Raw Layer for the optimizer roles: what they returned, turns and the raw usage (audit + budget)."""
     if log_to is not None:
         log_to.parent.mkdir(parents=True, exist_ok=True)
-        log_to.write_text(json.dumps({"turns": res.turns, "is_error": res.is_error,
-                                      "structured": res.structured, "text": res.text, "raw": res.raw},
+        log_to.write_text(json.dumps({"turns": res.turns, "is_error": res.is_error, "structured": res.structured,
+                                      "text": res.text, "transcript": res.transcript, "raw": res.raw},
                                      ensure_ascii=False, indent=1))
 
 
@@ -149,6 +149,17 @@ def outcome_summary(traces: list[Trace]) -> str:
                      for t in sorted(traces, key=lambda t: t["id"]))
 
 
+# The Proposer reads the wiki and TRAINING traces (§3.1: the Raw Layer holds the training rollouts).
+# Its Read tool is not sandboxed, so everything that would leak held-out answers is denied explicitly:
+# validation/eval traces, the splits (LiveMath test.jsonl carries answer letters), the data dir with
+# golden spreadsheets, and the per-task workdirs.
+_PROPOSER_DENY = ("raw/val-*", "raw/eval-*", ".data", "work", "dataset", ".hf-cache", ".venv")
+
+
+def _proposer_settings(ws: Path) -> dict:
+    return {"permissions": {"deny": [f"Read(/{ws / rel}/**)" for rel in _PROPOSER_DENY]}}  # //abs = absolute
+
+
 def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int = 25,
             task_desc: str = "multiple-choice mathematics questions", log_to: Path | None = None) -> dict:
     """Eq. 3: a ReAct agent over the wiki index, the impact tracker and the train outcomes; it
@@ -159,8 +170,8 @@ def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int
               f"# wiki/skill-impact.md\n\n{(ws / 'wiki/skill-impact.md').read_text()}\n\n"
               f"# Active skills (S_{{k-1}})\n\n{active}\n"
               f"# Training outcomes (iteration {k})\n\n{outcome_summary(traces)}\n")
-    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"],
-                     max_turns=max_turns, json_schema=PROPOSER_SCHEMA)
+    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"], max_turns=max_turns,
+                     json_schema=PROPOSER_SCHEMA, settings=_proposer_settings(ws), stream=True)
     _log_role(log_to, res)
     if not isinstance(res.structured, dict) or "action" not in res.structured:
         raise RoleError(f"proposer returned no structured output: {res.text[:200]!r}")

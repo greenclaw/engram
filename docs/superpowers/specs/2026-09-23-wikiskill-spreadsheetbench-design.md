@@ -67,9 +67,27 @@ bench would have been described as "multiple-choice mathematics questions").
   formula recalculation — a formula-only answer reads as `None`, the "library constraint"
   the paper mentions and SkillOpt's learned rule targets ("write evaluated static values").
   Missing or unreadable `output.xlsx` → 0. Hard score only (one test case).
-- **Known dataset defect** — in 2 of 400 tasks (`13-1`, `60-7`) the position names no sheet and
-  the official grader's default (first sheet of the golden file) differs from `answer_sheet`.
-  Kept as in the official grader and SkillLens, for comparability.
+- **Grader parity (verified 2026-09-23)** — our `grade` vs the official `compare_workbooks` on all
+  400 tasks, golden-vs-golden and input-vs-golden: 0 disagreements in 800 comparisons. Range parsing
+  is ported verbatim (not openpyxl's), because 4 positions are malformed and the official verdict on
+  them is whatever its parser + bare `except` produce.
+- **Dataset defects** (Verified 400 as shipped):
+  - 4 tasks are unsolvable under the official grader — even the golden file fails against itself:
+    `283-32` (whole-column `A:G`), `130-9` (commas inside a sheet name), `49300` (sheet name with a
+    leading NBSP), `45944` (spaces after commas). Ceiling = 396 / 400.
+  - 6 tasks deviate from the `1_<id>_{init,golden}.xlsx` layout (5 use `initial.xlsx` / `golden.xlsx`,
+    `42930`'s golden is named `1_43930_golden.xlsx`); we resolve them (deviation — with the literal
+    names they would be unsolvable and `prepare` would have no input).
+  - 2 tasks are already solved by the untouched input (`13-1`, `73-45`).
+  - 2 tasks (`13-1`, `60-7`) name no sheet in the position and the grader's default (first golden
+    sheet) differs from `answer_sheet`; kept as the official grader does.
+  - `45944` has an integer id; ids are normalized to strings.
+- **Proposer isolation** — its Read tool is not sandboxed, so held-out answers are denied explicitly
+  (`permissions.deny` with absolute `Read(//…/**)` rules, verified live): `raw/val-*`, `raw/eval-*`,
+  `.data` (golden files), `work`, `dataset` (LiveMath's `test.jsonl` carries answer letters),
+  `.hf-cache`, `.venv`. Wiki, skills and training traces stay readable, as in §3.1. The Proposer's
+  session is streamed, so its role log lists every file it read. (The first LiveMath run predates
+  this: its Proposer could have read validation traces; its reads were not logged.)
 
 ## Runs
 

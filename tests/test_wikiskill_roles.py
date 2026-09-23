@@ -20,7 +20,7 @@ def _trace(i, score, resp="x"):
 def test_rollout_writes_traces_and_resumes(monkeypatch, tmp_path):
     calls = []
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         calls.append((prompt, system, tools))
         return ClaudeResult(text="<answer>B</answer>", structured=None, turns=1, cost_usd=0.001, is_error=False)
 
@@ -141,7 +141,7 @@ def test_maintain_builds_prompt_and_validates(monkeypatch, tmp_path):
     (ws / "wiki/patterns/p.md").write_text("pat")
     seen = {}
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         seen.update(prompt=prompt, system=system, tools=tools, schema=json_schema, cwd=cwd)
         return ClaudeResult(text="", structured={"update_index": "# i", "append_log": "l"},
                             turns=1, cost_usd=0, is_error=False)
@@ -182,7 +182,7 @@ def test_propose_prompt_and_result(monkeypatch, tmp_path):
     (ws / "wiki/skill-impact.md").write_text("# Skill Impact\n\n## iter 1 — create x — Rejected\n")
     seen = {}
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         seen.update(prompt=prompt, system=system, tools=tools, max_turns=max_turns, schema=json_schema)
         return ClaudeResult(text="", structured={"action": "no_action"}, turns=5, cost_usd=0, is_error=False)
 
@@ -221,3 +221,26 @@ def test_propose_missing_structured_raises(monkeypatch, tmp_path):
         text="ran out of turns", structured=None, turns=25, cost_usd=0, is_error=False))
     with pytest.raises(r.RoleError):
         r.propose(ws, 1, [], model="haiku")
+
+
+def test_proposer_cannot_read_validation_test_or_gold_and_its_reads_are_logged(monkeypatch, tmp_path):
+    """§3.1: the Raw Layer the Proposer inspects holds TRAINING traces. Its Read tool is not sandboxed,
+    so validation/eval traces, the splits (LiveMath test answers) and the data dir (golden files) are
+    denied explicitly; the session is streamed so every file it read is in the role log."""
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    seen = {}
+
+    def fake(prompt, **kw):
+        seen.update(kw)
+        return ClaudeResult(text="", structured={"action": "no_action"}, turns=3, cost_usd=0, is_error=False,
+                            raw={}, transcript="[Read] {\"file_path\": \"wiki/index.md\"}")
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    r.propose(ws, 1, [], model="m", log_to=ws / "raw/roles/iter-1-proposer.json")
+    deny = seen["settings"]["permissions"]["deny"]
+    for rel in ("raw/val-*", "raw/eval-*", ".data", "work", "dataset", ".hf-cache", ".venv"):
+        assert f"Read(/{ws / rel}/**)" in deny
+    assert not any("raw/iter" in d or "wiki" in d or "skills" in d for d in deny)
+    assert seen["stream"] is True and seen["tools"] == ["Read"]
+    assert "wiki/index.md" in json.loads((ws / "raw/roles/iter-1-proposer.json").read_text())["transcript"]
