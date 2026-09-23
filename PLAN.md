@@ -115,6 +115,10 @@ in all three roles, 8 iterations. Workspace: `~/projects/engram-runs/livemath-ha
   67 items without it the delta is +4.5 pts, CI −7.5…+16.4 — not distinguishable from zero.
 - Consumption: 706 `claude -p` calls, 4.1M input / 6.7M output tokens, ~1050 API-minutes
   (≈ 3 h wall-clock at `--parallel 8`), on the claude.ai subscription.
+- Caveat found later (2026-09-23): this run's Proposer could Read `raw/val-*` traces (validation
+  answers) — its reads were not logged, so exposure is unknown. Fixed for later runs (explicit
+  read-deny + streamed Proposer log); the test numbers are unaffected in mechanism (test traces did
+  not exist during evolution) but the validation gate may have been fit.
 - Takeaway: the harness works end to end and reproduces the paper's *shape* (large LiveMath gain);
   the size of the gain on this bench is not evidence of transferable reasoning skill. Next
   signal-bearing runs: a bench without a structural shortcut (SpreadsheetBench), or LiveMath scored

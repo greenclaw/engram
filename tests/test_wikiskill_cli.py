@@ -2,6 +2,7 @@ import argparse
 import json
 
 from engram import cli
+from engram.wikiskill import bench as bench_mod
 from engram.wikiskill import cli as wcli
 from engram.wikiskill import workspace as w
 
@@ -25,21 +26,22 @@ def test_engram_main_dispatches(monkeypatch):
 def test_init_writes_splits(monkeypatch, tmp_path):
     recs = [{"no": i, "month": "202606", "mcq": {"question": f"q{i}", "correct_choice": {"label": "A", "text": "r"},
              "choices": [{"label": lab, "text": "d"} for lab in "BCDE"]}} for i in range(200)]
-    monkeypatch.setattr(wcli.LiveMath, "download_records", lambda self, cache_dir: recs)
+    monkeypatch.setattr(bench_mod.LiveMath, "download_records", lambda self, cache_dir: recs)
     ws = tmp_path / "ws"
     rc = wcli.run_evolve(argparse.Namespace(evolve_cmd="init", ws=str(ws), bench="livemath", seed=0))
     assert rc == 0
     assert len((ws / "dataset/train.jsonl").read_text().splitlines()) == 35
     assert len((ws / "dataset/test.jsonl").read_text().splitlines()) == 124
     assert json.loads((ws / "dataset/meta.json").read_text())["bench"] == "livemath"
-    assert ".hf-cache" in (ws / ".gitignore").read_text()
+    gi = (ws / ".gitignore").read_text()
+    assert all(d in gi for d in (".hf-cache/", ".data/", "work/", ".venv/"))
     assert w.git(ws, "status", "--porcelain").strip() == ""
 
 
 def test_init_refuses_existing_workspace(monkeypatch, tmp_path, capsys):
     recs = [{"no": i, "month": "202606", "mcq": {"question": f"q{i}", "correct_choice": {"label": "A", "text": "r"},
              "choices": [{"label": lab, "text": "d"} for lab in "BCDE"]}} for i in range(200)]
-    monkeypatch.setattr(wcli.LiveMath, "download_records", lambda self, cache_dir: recs)
+    monkeypatch.setattr(bench_mod.LiveMath, "download_records", lambda self, cache_dir: recs)
     ws = tmp_path / "ws"
     assert wcli.run_evolve(argparse.Namespace(evolve_cmd="init", ws=str(ws), bench="livemath", seed=0)) == 0
     before = (ws / "dataset/train.jsonl").read_text()

@@ -1,5 +1,7 @@
-"""Bench protocol (load / prompt / score) + LiveMathematicianBench. The evolution loop never
-sees dataset specifics; SpreadsheetBench later plugs in behind the same protocol."""
+"""Bench protocol + LiveMathematicianBench. The evolution loop never sees dataset specifics: a bench
+stages each task in its own workdir, builds the prompt, says how `claude -p` runs (tools, sandbox,
+env, turns), and grades — `score` returns (score, answer) where `answer` is what the trace records
+as the prediction (a letter here, the grader's verdict for SpreadsheetBench)."""
 from __future__ import annotations
 
 import json
@@ -20,11 +22,14 @@ class Task(TypedDict):
 
 class Bench(Protocol):
     name: str
-    tools: list[str]
+    task_desc: str  # {task_desc} in the E.3 Proposer prompt
 
+    def init(self, ws: Path, seed: int) -> dict[str, list[dict]]: ...  # download + split (engram evolve init)
     def system_prompt(self, skill_section: str) -> str: ...
-    def user_prompt(self, task: Task) -> str: ...
-    def score(self, task: Task, response: str) -> float: ...
+    def prepare(self, ws: Path, task: dict, workdir: Path) -> None: ...
+    def user_prompt(self, task: dict, workdir: Path | None) -> str: ...
+    def claude_opts(self, ws: Path, workdir: Path) -> dict: ...  # extra run_claude kwargs (tools, sandbox, …)
+    def score(self, ws: Path, task: dict, response: str, workdir: Path | None) -> tuple[float, str]: ...
 
 
 _ANSWER = re.compile(r"<answer>\s*([A-Za-z]+)\s*</answer>")
@@ -32,7 +37,7 @@ _ANSWER = re.compile(r"<answer>\s*([A-Za-z]+)\s*</answer>")
 
 class LiveMath:
     name = "livemath"
-    tools: list[str] = []
+    task_desc = "multiple-choice mathematics questions"
     HF_REPO = "LiveMathematicianBench/LiveMathematicianBench"
     SPLIT_SIZES = {"train": 35, "val": 18, "test": 124}  # Table 6
 
@@ -64,16 +69,27 @@ class LiveMath:
             recs.extend(json.loads(Path(p).read_text()))
         return recs
 
+    def init(self, ws: Path, seed: int) -> dict[str, list[Task]]:
+        return make_splits(self.tasks_from_records(self.download_records(ws / ".hf-cache"), seed),
+                           self.SPLIT_SIZES, seed)
+
     def system_prompt(self, skill_section: str) -> str:
         return (PROMPTS / "livemath.md").read_text().replace("{skill_section}", skill_section)
 
-    def user_prompt(self, task: Task) -> str:
+    def prepare(self, ws: Path, task: Task, workdir: Path) -> None:
+        return None  # single-step, no files
+
+    def user_prompt(self, task: Task, workdir: Path | None) -> str:
         opts = "\n".join(f"{k}. {v}" for k, v in sorted(task["choices"].items()))
         return f"{task['question']}\n\n{opts}"
 
-    def score(self, task: Task, response: str) -> float:
+    def claude_opts(self, ws: Path, workdir: Path) -> dict:
+        return {"tools": []}  # direct reasoning (Table 6)
+
+    def score(self, ws: Path, task: Task, response: str, workdir: Path | None) -> tuple[float, str]:
         hits = _ANSWER.findall(response)
-        return 1.0 if hits and hits[-1].strip().upper() == task["answer"] else 0.0
+        pred = hits[-1].strip().upper() if hits else ""
+        return (1.0 if pred == task["answer"] else 0.0), pred
 
 
 def make_splits(tasks: list[Task], sizes: dict[str, int], seed: int) -> dict[str, list[Task]]:
@@ -97,8 +113,15 @@ def read_split(path: Path) -> list[Task]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-_BENCHES = {"livemath": LiveMath}
+BENCH_NAMES = ["livemath", "spreadsheetbench"]
 
 
 def get_bench(name: str) -> Bench:
-    return _BENCHES[name]()
+    if name == "livemath":
+        return LiveMath()
+    if name == "spreadsheetbench":
+        from engram.wikiskill.spreadsheet import (
+            SpreadsheetBench,  # openpyxl only when needed
+        )
+        return SpreadsheetBench()
+    raise KeyError(name)

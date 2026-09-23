@@ -9,16 +9,22 @@ from engram.wikiskill.bench import write_split
 
 
 class FakeBench:
-    name, tools = "fake", []
+    name, task_desc = "fake", "fake tasks for tests"
 
     def system_prompt(self, s):
         return "SYS\n" + s
 
-    def user_prompt(self, t):
+    def prepare(self, ws, t, workdir):
+        return None
+
+    def user_prompt(self, t, workdir):
         return t["question"]
 
-    def score(self, t, resp):
-        return 1.0 if resp == t["answer"] else 0.0
+    def claude_opts(self, ws, workdir):
+        return {"tools": []}
+
+    def score(self, ws, t, resp, workdir):
+        return (1.0 if resp == t["answer"] else 0.0), resp
 
 
 def _ws(tmp_path, n_train=4, n_val=2):
@@ -50,10 +56,11 @@ def _wire(monkeypatch, val_scores, proposals, maint=None):
         for i, t in enumerate(tasks):
             resp = "A" if i < n_ok else "B"
             trs.append({"id": t["id"], "split": "x", "prompt": "p", "response": resp, "answer": resp,
-                        "gold": "A", "score": bench.score(t, resp), "cost_usd": 0.0})
+                        "gold": "A", "score": bench.score(ws, t, resp, None)[0]})
         return trs
 
     def fake_propose(ws, k, traces, *, model, **kw):
+        it["task_desc"] = kw.get("task_desc")
         p = proposals[it["prop"]]
         it["prop"] += 1
         return p
@@ -332,3 +339,10 @@ def test_default_log_flushes_so_progress_reaches_a_redirected_log(monkeypatch, t
     monkeypatch.setattr(L, "print", lambda *a, **kw: calls.append(kw), raising=False)
     L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1)
     assert calls and all(kw.get("flush") is True for kw in calls)
+
+
+def test_proposer_is_told_the_bench_task(monkeypatch, tmp_path):
+    ws = _ws(tmp_path)
+    it = _wire(monkeypatch, val_scores=[0.5, 0.5], proposals=[CREATE])
+    L.evolve(ws, FakeBench(), model="m", iters=1, parallel=1, **QUIET)
+    assert it["task_desc"] == "fake tasks for tests"

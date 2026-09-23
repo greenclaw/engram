@@ -47,7 +47,7 @@ def test_prompts():
     assert "## Skills\nfoo" in sp and "{skill_section}" not in sp
     assert "<answer>" in sp
     t = b.LiveMath.tasks_from_records([rec(1)], seed=0)[0]
-    up = lm.user_prompt(t)
+    up = lm.user_prompt(t, None)
     assert "Q1?" in up and "A." in up and "E." in up
 
 
@@ -61,10 +61,20 @@ def test_prompts():
 ])
 def test_score(resp, gold, exp):
     t = {"id": "x", "question": "q", "choices": {}, "answer": gold}
-    assert b.LiveMath().score(t, resp) == exp
+    assert b.LiveMath().score(None, t, resp, None)[0] == exp
 
 
 def test_get_bench():
     assert b.get_bench("livemath").name == "livemath"
     with pytest.raises(KeyError):
         b.get_bench("nope")
+
+
+def test_livemath_protocol_is_single_turn_no_tools_and_reports_the_letter(tmp_path):
+    lm = b.LiveMath()
+    t = {"id": "x", "question": "q", "choices": {"A": "a", "C": "c"}, "answer": "C"}
+    assert lm.prepare(tmp_path, t, tmp_path) is None and list(tmp_path.iterdir()) == []
+    assert lm.claude_opts(tmp_path, tmp_path) == {"tools": []}
+    assert lm.score(tmp_path, t, "<answer>c</answer>", tmp_path) == (1.0, "C")
+    assert lm.score(tmp_path, t, "no tags", tmp_path) == (0.0, "")
+    assert "mathematics" in lm.task_desc

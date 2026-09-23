@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from engram.wikiskill.bench import LiveMath, get_bench, make_splits, write_split
+from engram.wikiskill.bench import BENCH_NAMES, get_bench, write_split
 from engram.wikiskill.loop import (
     EvolveError,
     evaluate,
@@ -22,7 +22,7 @@ def add_evolve_parser(sub) -> None:
     es = pe.add_subparsers(dest="evolve_cmd", required=True)
     pi = es.add_parser("init", help="create a workspace and a frozen train/val/test split")
     pi.add_argument("--ws", required=True)
-    pi.add_argument("--bench", default="livemath", choices=["livemath"])
+    pi.add_argument("--bench", default="livemath", choices=BENCH_NAMES)
     pi.add_argument("--seed", type=int, default=0)
     pr = es.add_parser("run", help="run Algorithm 1 for --iters iterations (resumable)")
     pr.add_argument("--ws", required=True)
@@ -50,14 +50,13 @@ def run_evolve(args) -> int:
             print(f"engram evolve: {ws} is already initialized; use a new --ws for a new split", file=sys.stderr)
             return 2
         init_workspace(ws)
-        bench = LiveMath()
-        (ws / ".gitignore").write_text(".hf-cache/\n")
-        tasks = bench.tasks_from_records(bench.download_records(ws / ".hf-cache"), args.seed)
-        splits = make_splits(tasks, bench.SPLIT_SIZES, args.seed)
+        bench = get_bench(args.bench)
+        (ws / ".gitignore").write_text(".hf-cache/\n.data/\nwork/\n.venv/\n")  # derived or bulky, never committed
+        splits = bench.init(ws, args.seed)
         for name, ts in splits.items():
             write_split(ws / f"dataset/{name}.jsonl", ts)
         (ws / "dataset/meta.json").write_text(json.dumps({"bench": bench.name, "seed": args.seed,
-                                                         "sizes": bench.SPLIT_SIZES}, indent=1))
+                                                         "sizes": {k: len(v) for k, v in splits.items()}}, indent=1))
         commit_all(ws, "wikiskill: dataset split")
         print(f"initialized {ws}: " + ", ".join(f"{k}={len(v)}" for k, v in splits.items()))
         return 0

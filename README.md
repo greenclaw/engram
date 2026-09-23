@@ -101,7 +101,8 @@ on it.
 rolls out on training tasks, a Wiki Maintainer compiles the traces into a persistent
 `wiki/` of patterns, a ReAct Skill Proposer reads the wiki and proposes one skill change,
 and a strict validation gate keeps it only if the validation score improves — the wiki is
-never rolled back. First bench: LiveMathematicianBench. Design:
+never rolled back. Benches: LiveMathematicianBench and SpreadsheetBench (the agent edits real
+workbooks with Python in a sandboxed bash shell). Design:
 `docs/superpowers/specs/2026-09-22-wikiskill-design.md`.
 
 ## How it works

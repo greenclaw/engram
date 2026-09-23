@@ -3,7 +3,7 @@ Maintainer (one call, JSON), Skill Proposer (ReAct over Read, JSON final). Plus 
 from __future__ import annotations
 
 import json
-import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TypedDict
@@ -39,7 +39,6 @@ PROPOSER_SCHEMA = {
     },
     "required": ["action"],
 }
-_PRED = re.compile(r"<answer>\s*([^<]*?)\s*</answer>")
 
 
 class RoleError(RuntimeError):
@@ -71,16 +70,21 @@ def _infer(bench: Bench, ws: Path, task: Task, system: str, model: str, out_dir:
     f = out_dir / f"{task['id']}.json"
     if f.exists():  # resume: a trace on disk is immutable (Raw Layer), never re-rolled
         return json.loads(f.read_text())
-    prompt = bench.user_prompt(task)
-    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=list(bench.tools))
+    workdir = ws / "work" / out_dir.name / task["id"]  # gitignored: outputs can be MBs (spreadsheets)
+    if workdir.exists():  # no trace yet ⇒ any leftover is a crashed attempt's; never grade it
+        shutil.rmtree(workdir)
+    workdir.mkdir(parents=True)
+    bench.prepare(ws, task, workdir)
+    prompt = bench.user_prompt(task, workdir)
+    res = run_claude(prompt, system=system, model=model, cwd=workdir, **bench.claude_opts(ws, workdir))
     if res.is_error:  # not a measurement: keep a diagnostic, never a scorable trace (resume re-rolls it)
         f.with_suffix(".error.json").write_text(json.dumps({"id": task["id"], "error": res.text, "raw": res.raw},
                                                            ensure_ascii=False, indent=1))
         return {"id": task["id"], "error": res.text}
-    hits = _PRED.findall(res.text)
-    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.text,
-                 "answer": hits[-1] if hits else "", "gold": task["answer"],
-                 "score": bench.score(task, res.text)}  # usage lives in raw (tokens), not a derived USD
+    score, answer = bench.score(ws, task, res.text, workdir)
+    # tool-using benches: the trace is the whole session (commands + outputs), what §3.2.2 analyses
+    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.transcript or res.text,
+                 "answer": answer, "gold": task["answer"], "score": score}  # usage lives in raw (tokens)
     f.write_text(json.dumps({**tr, "raw": res.raw}, ensure_ascii=False, indent=1))
     return tr
 
@@ -123,8 +127,8 @@ def _log_role(log_to: Path | None, res: ClaudeResult) -> None:
     """Raw Layer for the optimizer roles: what they returned, turns and the raw usage (audit + budget)."""
     if log_to is not None:
         log_to.parent.mkdir(parents=True, exist_ok=True)
-        log_to.write_text(json.dumps({"turns": res.turns, "is_error": res.is_error,
-                                      "structured": res.structured, "text": res.text, "raw": res.raw},
+        log_to.write_text(json.dumps({"turns": res.turns, "is_error": res.is_error, "structured": res.structured,
+                                      "text": res.text, "transcript": res.transcript, "raw": res.raw},
                                      ensure_ascii=False, indent=1))
 
 
@@ -148,6 +152,17 @@ def outcome_summary(traces: list[Trace]) -> str:
                      for t in sorted(traces, key=lambda t: t["id"]))
 
 
+# The Proposer reads the wiki and TRAINING traces (§3.1: the Raw Layer holds the training rollouts).
+# Its Read tool is not sandboxed, so everything that would leak held-out answers is denied explicitly:
+# validation/eval traces, the splits (LiveMath test.jsonl carries answer letters), the data dir with
+# golden spreadsheets, and the per-task workdirs.
+_PROPOSER_DENY = ("raw/val-*", "raw/eval-*", ".data", "work", "dataset", ".hf-cache", ".venv")
+
+
+def _proposer_settings(ws: Path) -> dict:
+    return {"permissions": {"deny": [f"Read(/{ws / rel}/**)" for rel in _PROPOSER_DENY]}}  # //abs = absolute
+
+
 def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int = 25,
             task_desc: str = "multiple-choice mathematics questions", log_to: Path | None = None) -> dict:
     """Eq. 3: a ReAct agent over the wiki index, the impact tracker and the train outcomes; it
@@ -158,8 +173,8 @@ def propose(ws: Path, k: int, traces: list[Trace], *, model: str, max_turns: int
               f"# wiki/skill-impact.md\n\n{(ws / 'wiki/skill-impact.md').read_text()}\n\n"
               f"# Active skills (S_{{k-1}})\n\n{active}\n"
               f"# Training outcomes (iteration {k})\n\n{outcome_summary(traces)}\n")
-    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"],
-                     max_turns=max_turns, json_schema=PROPOSER_SCHEMA)
+    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=["Read"], max_turns=max_turns,
+                     json_schema=PROPOSER_SCHEMA, settings=_proposer_settings(ws), stream=True)
     _log_role(log_to, res)
     if not isinstance(res.structured, dict) or "action" not in res.structured:
         raise RoleError(f"proposer returned no structured output: {res.text[:200]!r}")

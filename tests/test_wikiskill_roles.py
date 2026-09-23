@@ -20,7 +20,7 @@ def _trace(i, score, resp="x"):
 def test_rollout_writes_traces_and_resumes(monkeypatch, tmp_path):
     calls = []
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         calls.append((prompt, system, tools))
         return ClaudeResult(text="<answer>B</answer>", structured=None, turns=1, cost_usd=0.001, is_error=False)
 
@@ -51,6 +51,48 @@ def test_traces_and_role_logs_carry_no_derived_usd(monkeypatch, tmp_path):
     for f in (ws / "raw/iter-1/t0.json", ws / "raw/roles/iter-1-maintainer.json"):
         d = json.loads(f.read_text())
         assert "cost_usd" not in d and d["raw"]["usage"]["output_tokens"] == 9
+
+
+class ToolBench:
+    """A bench with a per-task workdir, tools and a file-based grade (the SpreadsheetBench shape)."""
+    name, task_desc = "toolbench", "file tasks"
+
+    def system_prompt(self, s):
+        return "SYS" + s
+
+    def prepare(self, ws, t, workdir):
+        (workdir / "input.txt").write_text(t["question"])
+
+    def user_prompt(self, t, workdir):
+        return f"edit {workdir}/input.txt"
+
+    def claude_opts(self, ws, workdir):
+        return {"tools": ["Bash"], "allowed_tools": ["Bash"], "stream": True, "max_turns": 30,
+                "settings": {"sandbox": {"filesystem": {"allowRead": [str(workdir)]}}}}
+
+    def score(self, ws, t, resp, workdir):
+        ok = (workdir / "output.txt").exists()
+        return (1.0 if ok else 0.0), ("ok" if ok else "File not exist")
+
+
+def test_rollout_runs_each_task_in_its_own_prepared_workdir(monkeypatch, tmp_path):
+    seen = []
+
+    def fake(prompt, **kw):
+        seen.append(kw)
+        (kw["cwd"] / "output.txt").write_text("done")
+        return ClaudeResult(text="Saved", structured=None, turns=5, cost_usd=0, is_error=False,
+                            raw={"usage": {"output_tokens": 7}}, transcript="$ ls\ninput.txt\nSaved")
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    tr = r.rollout(ToolBench(), tmp_path, [_task(0)], skills_text="", model="m", parallel=1,
+                   out_dir=tmp_path / "raw/iter-1")
+    wd = tmp_path / "work/iter-1/t0"
+    assert seen[0]["cwd"] == wd and (wd / "input.txt").read_text() == "q0"
+    assert seen[0]["tools"] == ["Bash"] and seen[0]["stream"] is True and seen[0]["max_turns"] == 30
+    assert seen[0]["settings"]["sandbox"]["filesystem"]["allowRead"] == [str(wd)]
+    assert tr[0]["score"] == 1.0 and tr[0]["answer"] == "ok" and tr[0]["response"].startswith("$ ls")
+    assert tr[0]["prompt"] == f"edit {wd}/input.txt"
 
 
 def test_rollout_split_labels(monkeypatch, tmp_path):
@@ -99,7 +141,7 @@ def test_maintain_builds_prompt_and_validates(monkeypatch, tmp_path):
     (ws / "wiki/patterns/p.md").write_text("pat")
     seen = {}
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         seen.update(prompt=prompt, system=system, tools=tools, schema=json_schema, cwd=cwd)
         return ClaudeResult(text="", structured={"update_index": "# i", "append_log": "l"},
                             turns=1, cost_usd=0, is_error=False)
@@ -140,7 +182,7 @@ def test_propose_prompt_and_result(monkeypatch, tmp_path):
     (ws / "wiki/skill-impact.md").write_text("# Skill Impact\n\n## iter 1 — create x — Rejected\n")
     seen = {}
 
-    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900):
+    def fake(prompt, *, system, model, cwd, tools, max_turns=None, json_schema=None, timeout=900, **kw):
         seen.update(prompt=prompt, system=system, tools=tools, max_turns=max_turns, schema=json_schema)
         return ClaudeResult(text="", structured={"action": "no_action"}, turns=5, cost_usd=0, is_error=False)
 
@@ -179,3 +221,43 @@ def test_propose_missing_structured_raises(monkeypatch, tmp_path):
         text="ran out of turns", structured=None, turns=25, cost_usd=0, is_error=False))
     with pytest.raises(r.RoleError):
         r.propose(ws, 1, [], model="haiku")
+
+
+def test_proposer_cannot_read_validation_test_or_gold_and_its_reads_are_logged(monkeypatch, tmp_path):
+    """§3.1: the Raw Layer the Proposer inspects holds TRAINING traces. Its Read tool is not sandboxed,
+    so validation/eval traces, the splits (LiveMath test answers) and the data dir (golden files) are
+    denied explicitly; the session is streamed so every file it read is in the role log."""
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    seen = {}
+
+    def fake(prompt, **kw):
+        seen.update(kw)
+        return ClaudeResult(text="", structured={"action": "no_action"}, turns=3, cost_usd=0, is_error=False,
+                            raw={}, transcript="[Read] {\"file_path\": \"wiki/index.md\"}")
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    r.propose(ws, 1, [], model="m", log_to=ws / "raw/roles/iter-1-proposer.json")
+    deny = seen["settings"]["permissions"]["deny"]
+    for rel in ("raw/val-*", "raw/eval-*", ".data", "work", "dataset", ".hf-cache", ".venv"):
+        assert f"Read(/{ws / rel}/**)" in deny
+    assert not any("raw/iter" in d or "wiki" in d or "skills" in d for d in deny)
+    assert seen["stream"] is True and seen["tools"] == ["Read"]
+    assert "wiki/index.md" in json.loads((ws / "raw/roles/iter-1-proposer.json").read_text())["transcript"]
+
+
+def test_rerolled_task_starts_from_a_clean_workdir(monkeypatch, tmp_path):
+    """A crash after the agent wrote output.xlsx but before the trace was saved re-rolls the task; the
+    stale output must not survive into the new attempt, or the grader credits the previous run."""
+    stale = tmp_path / "work/iter-1/t0"
+    stale.mkdir(parents=True)
+    (stale / "output.txt").write_text("from a crashed attempt")
+
+    def fake(prompt, **kw):
+        return ClaudeResult(text="gave up", structured=None, turns=2, cost_usd=0, is_error=False)
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    tr = r.rollout(ToolBench(), tmp_path, [_task(0)], skills_text="", model="m", parallel=1,
+                   out_dir=tmp_path / "raw/iter-1")
+    assert tr[0]["score"] == 0.0 and tr[0]["answer"] == "File not exist"
+    assert sorted(p.name for p in stale.iterdir()) == ["input.txt"]
