@@ -38,6 +38,21 @@ def test_rollout_writes_traces_and_resumes(monkeypatch, tmp_path):
     assert calls == [] and [t["id"] for t in traces2] == ["t0", "t1"]  # resumed from disk, same order
 
 
+def test_traces_and_role_logs_carry_no_derived_usd(monkeypatch, tmp_path):
+    """Consumption is tokens (usage_of reads raw.usage); the harness must not write its own USD field.
+    The raw claude JSON keeps whatever claude returned, untouched."""
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    res = ClaudeResult(text="<answer>B</answer>", structured={"update_index": "# i", "append_log": "l"},
+                       turns=1, cost_usd=0.05, is_error=False, raw={"total_cost_usd": 0.05, "usage": {"output_tokens": 9}})
+    monkeypatch.setattr(r, "run_claude", lambda *a, **k: res)
+    r.rollout(LiveMath(), ws, [_task(0)], skills_text="", model="m", parallel=1, out_dir=ws / "raw/iter-1")
+    r.maintain(ws, [], model="m", log_to=ws / "raw/roles/iter-1-maintainer.json")
+    for f in (ws / "raw/iter-1/t0.json", ws / "raw/roles/iter-1-maintainer.json"):
+        d = json.loads(f.read_text())
+        assert "cost_usd" not in d and d["raw"]["usage"]["output_tokens"] == 9
+
+
 def test_rollout_split_labels(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "run_claude", lambda *a, **k: ClaudeResult(
         text="", structured=None, turns=1, cost_usd=0, is_error=False))
@@ -97,7 +112,7 @@ def test_maintain_builds_prompt_and_validates(monkeypatch, tmp_path):
     assert seen["schema"] is r.MAINTAINER_SCHEMA
 
 
-def test_roles_log_raw_result_with_cost(monkeypatch, tmp_path):
+def test_roles_log_raw_result(monkeypatch, tmp_path):
     ws = tmp_path / "ws"
     w.init_workspace(ws)
     outs = iter([{"update_index": "# i", "append_log": "l"}, {"action": "no_action"}])
@@ -107,7 +122,7 @@ def test_roles_log_raw_result_with_cost(monkeypatch, tmp_path):
     r.propose(ws, 1, [], model="m", log_to=ws / "raw/roles/iter-1-proposer.json")
     for role in ("maintainer", "proposer"):
         d = json.loads((ws / f"raw/roles/iter-1-{role}.json").read_text())
-        assert d["cost_usd"] == 0.02 and d["turns"] == 4 and d["structured"]
+        assert d["turns"] == 4 and d["structured"] and d["raw"] == {"total_cost_usd": 0.02}
 
 
 def test_maintain_missing_structured_raises(monkeypatch, tmp_path):
