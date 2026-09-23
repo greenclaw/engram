@@ -213,3 +213,19 @@ def test_missing_input_fails_loud(tmp_path):
     (ws / ".data" / s.DATA_DIRNAME / "spreadsheet" / "t1").mkdir(parents=True)
     with pytest.raises(FileNotFoundError, match="t1"):
         s.SpreadsheetBench().prepare(ws, TASK, tmp_path)
+
+
+def test_python_root_covers_the_whole_symlink_chain(tmp_path):
+    """Live smoke: uv venvs point at `…/python/cpython-3.13-…/bin/python3.13`, itself a symlink to
+    `cpython-3.13.13-…`. Re-opening only the resolved install dir left the intermediate link under the
+    denied ~/, so the sandbox made the venv's python3 unusable and `python3` fell through to
+    /usr/bin/python3 (no openpyxl). The allowed root must be the directory holding the installs."""
+    root = tmp_path / "uv" / "python"
+    real = root / "cpython-3.13.13-macos"
+    (real / "bin").mkdir(parents=True)
+    (real / "bin" / "python3.13").write_text("")
+    (root / "cpython-3.13-macos").symlink_to(real)
+    venv = tmp_path / "ws" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(root / "cpython-3.13-macos" / "bin" / "python3.13")
+    assert s._python_root(venv) == root

@@ -123,9 +123,11 @@ def preview(path: Path) -> str:
 # --- environment ------------------------------------------------------------------------------
 
 def _python_root(venv: Path) -> Path:
-    """The interpreter install the venv points at (uv-managed python lives under ~, so the sandbox
-    must re-open exactly that directory for reads)."""
-    return Path(os.path.realpath(venv / "bin" / "python")).parents[1]
+    """The directory holding the interpreter installs the venv points at (uv keeps them under ~, so
+    the sandbox must re-open them for reads). Not just the resolved install dir: uv links
+    `cpython-3.13-…` → `cpython-3.13.13-…`, and every link on the chain must stay readable, or the
+    venv's python3 is unusable and `python3` silently falls through to /usr/bin/python3."""
+    return Path(os.path.realpath(venv / "bin" / "python")).parents[2]
 
 
 def _make_venv(venv: Path) -> None:
