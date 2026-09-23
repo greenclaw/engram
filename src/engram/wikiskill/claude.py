@@ -21,6 +21,7 @@ class ClaudeResult:
     is_error: bool
     raw: dict = field(default_factory=dict)
     transcript: str = ""  # stream mode: the session's commands, outputs and final text
+    hit_max_turns: bool = False
 
 
 def _exec(argv: list[str], cwd: Path, timeout: int, env: dict | None = None) -> str:
@@ -95,6 +96,11 @@ def run_claude(prompt: str, *, system: str, model: str, cwd: Path, tools: list[s
             d = json.loads(out)
         except json.JSONDecodeError:  # not-logged-in / crash banners are plain text
             return ClaudeResult(text=out.strip(), structured=None, turns=0, cost_usd=0.0, is_error=True)
-    return ClaudeResult(text=str(d.get("result", "")), structured=d.get("structured_output"),
-                        turns=int(d.get("num_turns", 0)), cost_usd=float(d.get("total_cost_usd", 0.0)),
-                        is_error=bool(d.get("is_error", False)), raw=d, transcript=transcript)
+    # Running out of turns is the agent's outcome (grade what it left behind), not a failed call to retry.
+    maxed = d.get("subtype") == "error_max_turns"
+    if maxed and stream:
+        transcript += "\n[max turns reached]"
+    return ClaudeResult(text=str(d.get("result") or ""), structured=d.get("structured_output"),
+                        turns=int(d.get("num_turns", 0)), cost_usd=float(d.get("total_cost_usd") or 0.0),
+                        is_error=bool(d.get("is_error", False)) and not maxed, raw=d, transcript=transcript,
+                        hit_max_turns=maxed)

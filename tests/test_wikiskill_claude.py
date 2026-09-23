@@ -123,3 +123,16 @@ def test_stream_mode_without_result_event_is_error(monkeypatch, tmp_path):
     monkeypatch.setattr(c, "_exec", lambda argv, cwd, timeout, env=None: _stream({"type": "system"}))
     r = c.run_claude("go", system="S", model="haiku", cwd=tmp_path, tools=["Bash"], stream=True)
     assert r.is_error and "no result event" in r.text
+
+
+def test_max_turns_is_an_agent_outcome_not_a_call_failure(monkeypatch, tmp_path):
+    """Live: hitting --max-turns yields is_error=true, subtype=error_max_turns, result=null. A task the
+    agent could not finish in 30 turns is a failed attempt to grade, not an infra error to retry."""
+    out = _stream({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash",
+                                                                 "input": {"command": "echo 1"}}]}},
+                  {"type": "result", "subtype": "error_max_turns", "is_error": True, "num_turns": 30,
+                   "result": None, "terminal_reason": "max_turns"})
+    monkeypatch.setattr(c, "_exec", lambda argv, cwd, timeout, env=None: out)
+    r = c.run_claude("go", system="S", model="haiku", cwd=tmp_path, tools=["Bash"], stream=True, max_turns=30)
+    assert r.is_error is False and r.text == "" and r.turns == 30 and r.hit_max_turns is True
+    assert "$ echo 1" in r.transcript and "[max turns reached]" in r.transcript
