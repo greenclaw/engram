@@ -19,6 +19,7 @@ HF_REPO, TARBALL = "KAKA22/SpreadsheetBench", "spreadsheetbench_verified_400.tar
 DATA_DIRNAME = "spreadsheetbench_verified_400"
 PREVIEW_ROWS, PREVIEW_CELL, PREVIEW_CAP = 5, 60, 6000
 MAX_TURNS = 30  # SkillOpt's SpreadsheetBench setting: "up to 30 turns"
+SESSION_TIMEOUT = 1800  # s; a timeout is a retried failure, so it must exceed any honest 30-turn session
 
 
 # --- grader (official evaluation.py semantics) -----------------------------------------------
@@ -197,6 +198,7 @@ class SpreadsheetBench:
                    "filesystem": {"denyRead": ["~/"],
                                   "allowRead": [str(workdir), str(venv), str(_python_root(venv))]}}
         return {"tools": ["Bash"], "allowed_tools": ["Bash"], "stream": True, "max_turns": MAX_TURNS,
+                "timeout": SESSION_TIMEOUT,
                 "settings": {"sandbox": sandbox},
                 "env": {"PATH": f"{venv / 'bin'}:{os.environ.get('PATH', '')}", "VIRTUAL_ENV": str(venv)}}
 

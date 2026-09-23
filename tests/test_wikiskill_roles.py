@@ -244,3 +244,20 @@ def test_proposer_cannot_read_validation_test_or_gold_and_its_reads_are_logged(m
     assert not any("raw/iter" in d or "wiki" in d or "skills" in d for d in deny)
     assert seen["stream"] is True and seen["tools"] == ["Read"]
     assert "wiki/index.md" in json.loads((ws / "raw/roles/iter-1-proposer.json").read_text())["transcript"]
+
+
+def test_rerolled_task_starts_from_a_clean_workdir(monkeypatch, tmp_path):
+    """A crash after the agent wrote output.xlsx but before the trace was saved re-rolls the task; the
+    stale output must not survive into the new attempt, or the grader credits the previous run."""
+    stale = tmp_path / "work/iter-1/t0"
+    stale.mkdir(parents=True)
+    (stale / "output.txt").write_text("from a crashed attempt")
+
+    def fake(prompt, **kw):
+        return ClaudeResult(text="gave up", structured=None, turns=2, cost_usd=0, is_error=False)
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    tr = r.rollout(ToolBench(), tmp_path, [_task(0)], skills_text="", model="m", parallel=1,
+                   out_dir=tmp_path / "raw/iter-1")
+    assert tr[0]["score"] == 0.0 and tr[0]["answer"] == "File not exist"
+    assert sorted(p.name for p in stale.iterdir()) == ["input.txt"]

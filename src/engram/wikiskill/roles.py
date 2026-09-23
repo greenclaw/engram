@@ -3,6 +3,7 @@ Maintainer (one call, JSON), Skill Proposer (ReAct over Read, JSON final). Plus 
 from __future__ import annotations
 
 import json
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TypedDict
@@ -70,7 +71,9 @@ def _infer(bench: Bench, ws: Path, task: Task, system: str, model: str, out_dir:
     if f.exists():  # resume: a trace on disk is immutable (Raw Layer), never re-rolled
         return json.loads(f.read_text())
     workdir = ws / "work" / out_dir.name / task["id"]  # gitignored: outputs can be MBs (spreadsheets)
-    workdir.mkdir(parents=True, exist_ok=True)
+    if workdir.exists():  # no trace yet ⇒ any leftover is a crashed attempt's; never grade it
+        shutil.rmtree(workdir)
+    workdir.mkdir(parents=True)
     bench.prepare(ws, task, workdir)
     prompt = bench.user_prompt(task, workdir)
     res = run_claude(prompt, system=system, model=model, cwd=workdir, **bench.claude_opts(ws, workdir))

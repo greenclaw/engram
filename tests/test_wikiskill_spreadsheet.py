@@ -132,6 +132,7 @@ def test_claude_opts_sandbox_env_turns(tmp_path, monkeypatch):
     monkeypatch.setattr(s, "_python_root", lambda venv: Path("/uv/python/cpython-3.13"))
     o = s.SpreadsheetBench().claude_opts(ws, wd)
     assert o["tools"] == ["Bash"] and o["allowed_tools"] == ["Bash"] and o["stream"] is True and o["max_turns"] == 30
+    assert o["timeout"] == 1800  # a 30-turn session can outlast the 900 s default; a timeout is retried forever
     sb = o["settings"]["sandbox"]
     assert sb["enabled"] is True and sb["allowUnsandboxedCommands"] is False
     assert sb["filesystem"]["denyRead"] == ["~/"]
