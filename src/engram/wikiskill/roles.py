@@ -3,7 +3,6 @@ Maintainer (one call, JSON), Skill Proposer (ReAct over Read, JSON final). Plus 
 from __future__ import annotations
 
 import json
-import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TypedDict
@@ -39,7 +38,6 @@ PROPOSER_SCHEMA = {
     },
     "required": ["action"],
 }
-_PRED = re.compile(r"<answer>\s*([^<]*?)\s*</answer>")
 
 
 class RoleError(RuntimeError):
@@ -71,16 +69,19 @@ def _infer(bench: Bench, ws: Path, task: Task, system: str, model: str, out_dir:
     f = out_dir / f"{task['id']}.json"
     if f.exists():  # resume: a trace on disk is immutable (Raw Layer), never re-rolled
         return json.loads(f.read_text())
-    prompt = bench.user_prompt(task)
-    res = run_claude(prompt, system=system, model=model, cwd=ws, tools=list(bench.tools))
+    workdir = ws / "work" / out_dir.name / task["id"]  # gitignored: outputs can be MBs (spreadsheets)
+    workdir.mkdir(parents=True, exist_ok=True)
+    bench.prepare(ws, task, workdir)
+    prompt = bench.user_prompt(task, workdir)
+    res = run_claude(prompt, system=system, model=model, cwd=workdir, **bench.claude_opts(ws, workdir))
     if res.is_error:  # not a measurement: keep a diagnostic, never a scorable trace (resume re-rolls it)
         f.with_suffix(".error.json").write_text(json.dumps({"id": task["id"], "error": res.text, "raw": res.raw},
                                                            ensure_ascii=False, indent=1))
         return {"id": task["id"], "error": res.text}
-    hits = _PRED.findall(res.text)
-    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.text,
-                 "answer": hits[-1] if hits else "", "gold": task["answer"],
-                 "score": bench.score(task, res.text)}  # usage lives in raw (tokens), not a derived USD
+    score, answer = bench.score(ws, task, res.text, workdir)
+    # tool-using benches: the trace is the whole session (commands + outputs), what §3.2.2 analyses
+    tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.transcript or res.text,
+                 "answer": answer, "gold": task["answer"], "score": score}  # usage lives in raw (tokens)
     f.write_text(json.dumps({**tr, "raw": res.raw}, ensure_ascii=False, indent=1))
     return tr
 

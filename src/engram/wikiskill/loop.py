@@ -125,7 +125,8 @@ def evolve(ws: Path, bench: Bench, *, model: str, iters: int, parallel: int, log
         entry = {"k": k, "action": None, "name": None, "r_val": None, "r_best": st["r_best"], "outcome": None}
         p, diff, r_val = {"action": "invalid", "name": ""}, "", None
         try:
-            p = pend["proposal"] or propose(ws, k, traces, model=model, log_to=roles / f"iter-{k}-proposer.json")
+            p = pend["proposal"] or propose(ws, k, traces, model=model, task_desc=bench.task_desc,
+                                            log_to=roles / f"iter-{k}-proposer.json")
             pend["proposal"] = p  # line 11 — stored, so a crash below never re-proposes
             save_state(ws, st)
             entry["action"], entry["name"] = p.get("action"), p.get("name")

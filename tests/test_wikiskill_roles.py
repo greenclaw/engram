@@ -53,6 +53,48 @@ def test_traces_and_role_logs_carry_no_derived_usd(monkeypatch, tmp_path):
         assert "cost_usd" not in d and d["raw"]["usage"]["output_tokens"] == 9
 
 
+class ToolBench:
+    """A bench with a per-task workdir, tools and a file-based grade (the SpreadsheetBench shape)."""
+    name, task_desc = "toolbench", "file tasks"
+
+    def system_prompt(self, s):
+        return "SYS" + s
+
+    def prepare(self, ws, t, workdir):
+        (workdir / "input.txt").write_text(t["question"])
+
+    def user_prompt(self, t, workdir):
+        return f"edit {workdir}/input.txt"
+
+    def claude_opts(self, ws, workdir):
+        return {"tools": ["Bash"], "allowed_tools": ["Bash"], "stream": True, "max_turns": 30,
+                "settings": {"sandbox": {"filesystem": {"allowRead": [str(workdir)]}}}}
+
+    def score(self, ws, t, resp, workdir):
+        ok = (workdir / "output.txt").exists()
+        return (1.0 if ok else 0.0), ("ok" if ok else "File not exist")
+
+
+def test_rollout_runs_each_task_in_its_own_prepared_workdir(monkeypatch, tmp_path):
+    seen = []
+
+    def fake(prompt, **kw):
+        seen.append(kw)
+        (kw["cwd"] / "output.txt").write_text("done")
+        return ClaudeResult(text="Saved", structured=None, turns=5, cost_usd=0, is_error=False,
+                            raw={"usage": {"output_tokens": 7}}, transcript="$ ls\ninput.txt\nSaved")
+
+    monkeypatch.setattr(r, "run_claude", fake)
+    tr = r.rollout(ToolBench(), tmp_path, [_task(0)], skills_text="", model="m", parallel=1,
+                   out_dir=tmp_path / "raw/iter-1")
+    wd = tmp_path / "work/iter-1/t0"
+    assert seen[0]["cwd"] == wd and (wd / "input.txt").read_text() == "q0"
+    assert seen[0]["tools"] == ["Bash"] and seen[0]["stream"] is True and seen[0]["max_turns"] == 30
+    assert seen[0]["settings"]["sandbox"]["filesystem"]["allowRead"] == [str(wd)]
+    assert tr[0]["score"] == 1.0 and tr[0]["answer"] == "ok" and tr[0]["response"].startswith("$ ls")
+    assert tr[0]["prompt"] == f"edit {wd}/input.txt"
+
+
 def test_rollout_split_labels(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "run_claude", lambda *a, **k: ClaudeResult(
         text="", structured=None, turns=1, cost_usd=0, is_error=False))
