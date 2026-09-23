@@ -86,18 +86,36 @@ def test_gate_accept_and_early_stop(monkeypatch, tmp_path):
     assert "skills/s1/SKILL.md" in w.git(ws, "ls-tree", "-r", "--name-only", "accepted-1")
     assert (ws / "wiki/patterns/p.md").exists() and "found p" in (ws / "wiki/log.md").read_text()
     assert (ws / "raw/val-0").is_dir() and (ws / "raw/iter-1").is_dir() and (ws / "raw/val-1").is_dir()
-    assert st["history"][0]["cost_usd"] == 0.0  # fakes cost nothing; real runs sum traces + role logs
+    assert st["history"][0]["usage"]["calls"] == 0  # fakes write no traces; real runs sum raw/ usage
+    assert "cost_usd" not in st["history"][0]  # subscription runs: consumption is tokens, not USD
 
 
-def test_iteration_cost_sums_traces_and_role_logs(tmp_path):
+def _raw(inp, cache_w, cache_r, out, ms):
+    return {"raw": {"usage": {"input_tokens": inp, "cache_creation_input_tokens": cache_w,
+                              "cache_read_input_tokens": cache_r, "output_tokens": out},
+                    "duration_api_ms": ms, "total_cost_usd": 99.0}}
+
+
+def test_iteration_usage_sums_calls_tokens_and_api_time(tmp_path):
     ws = tmp_path / "ws"
     w.init_workspace(ws)
-    for rel, cost in (("raw/iter-2/t0.json", 0.01), ("raw/iter-2/t1.json", 0.02), ("raw/val-2/v0.json", 0.03),
-                      ("raw/roles/iter-2-maintainer.json", 0.1), ("raw/roles/iter-2-proposer.json", 0.2),
-                      ("raw/iter-3/t0.json", 9.0), ("raw/iter-2/t2.error.json", 9.0)):
+    for rel, rec in (("raw/iter-2/t0.json", _raw(10, 100, 1000, 500, 30_000)),
+                     ("raw/iter-2/t1.json", _raw(1, 0, 0, 1500, 30_000)),
+                     ("raw/val-2/v0.json", _raw(0, 0, 0, 2000, 60_000)),
+                     ("raw/roles/iter-2-maintainer.json", _raw(5, 0, 0, 100, 6_000)),
+                     ("raw/roles/iter-2-proposer.json", _raw(5, 0, 0, 900, 54_000)),
+                     ("raw/iter-3/t0.json", _raw(9, 9, 9, 9, 9)),           # another iteration
+                     ("raw/iter-2/t2.error.json", _raw(9, 9, 9, 9, 9))):    # a failed call, re-rolled later
         (ws / rel).parent.mkdir(parents=True, exist_ok=True)
-        (ws / rel).write_text(json.dumps({"cost_usd": cost}))
-    assert round(L.iteration_cost(ws, 2), 6) == 0.36
+        (ws / rel).write_text(json.dumps(rec))
+    u = L.iteration_usage(ws, 2)
+    assert u == {"calls": 5, "input_tokens": 1121, "output_tokens": 5000, "api_seconds": 180.0}
+
+
+def test_usage_tolerates_records_without_raw_usage(tmp_path):
+    f = tmp_path / "x.json"
+    f.write_text(json.dumps({"id": "t0", "raw": {}}))
+    assert L.usage_of([f]) == {"calls": 1, "input_tokens": 0, "output_tokens": 0, "api_seconds": 0.0}
 
 
 def test_reject_rolls_back_skills_keeps_wiki(monkeypatch, tmp_path):

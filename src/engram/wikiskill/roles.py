@@ -54,7 +54,6 @@ class Trace(TypedDict, total=False):
     answer: str
     gold: str
     score: float
-    cost_usd: float
     error: str
 
 
@@ -81,7 +80,7 @@ def _infer(bench: Bench, ws: Path, task: Task, system: str, model: str, out_dir:
     hits = _PRED.findall(res.text)
     tr: Trace = {"id": task["id"], "split": split, "prompt": prompt, "response": res.text,
                  "answer": hits[-1] if hits else "", "gold": task["answer"],
-                 "score": bench.score(task, res.text), "cost_usd": res.cost_usd}
+                 "score": bench.score(task, res.text)}  # usage lives in raw (tokens), not a derived USD
     f.write_text(json.dumps({**tr, "raw": res.raw}, ensure_ascii=False, indent=1))
     return tr
 
@@ -121,10 +120,10 @@ def _trace_block(t: Trace) -> str:
 
 
 def _log_role(log_to: Path | None, res: ClaudeResult) -> None:
-    """Raw Layer for the optimizer roles: what they returned, turns and cost (audit + budget)."""
+    """Raw Layer for the optimizer roles: what they returned, turns and the raw usage (audit + budget)."""
     if log_to is not None:
         log_to.parent.mkdir(parents=True, exist_ok=True)
-        log_to.write_text(json.dumps({"cost_usd": res.cost_usd, "turns": res.turns, "is_error": res.is_error,
+        log_to.write_text(json.dumps({"turns": res.turns, "is_error": res.is_error,
                                       "structured": res.structured, "text": res.text, "raw": res.raw},
                                      ensure_ascii=False, indent=1))
 
