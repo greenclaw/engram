@@ -124,6 +124,30 @@ in all three roles, 8 iterations. Workspace: `~/projects/engram-runs/livemath-ha
   signal-bearing runs: a bench without a structural shortcut (SpreadsheetBench), or LiveMath scored
   on non-meta items only.
 
+## WikiSkill — SpreadsheetBench, Haiku (2026-09-24)
+Verified 400, split 80/40/280 seed 0, Claude Haiku 4.5 in all roles, 8 iterations, sandboxed bash
+agent. Workspace: `~/projects/engram-runs/ssb-haiku-s0` (the Sonnet run will copy the same `ssb-s0`).
+
+| test (280) | accuracy | vs no skill (paired, bootstrap 95% CI) |
+|---|---|---|
+| no skill | 31.1% | — |
+| skill after iter 2 (checkpoint) | 68.9% | +37.9 pts [+31.4, +44.3] |
+| **final skill (iter 4, R_best)** | **62.9%** | **+31.8 pts [+25.7, +37.9]** — 99 fixed, 10 broken |
+
+- Validation 0.450 → 0.700; accepted iters 1, 2, 4 (all on one skill,
+  `compute_cell_values_programmatically`, 544 lines at the end); iters 3, 5–8 rejected; 14 wiki patterns.
+- The gain is a real environment procedure, not a benchmark shortcut: the dominant no-skill failure is
+  an empty cell (formula written without a cached value — the grader reads cached values only), 174 of
+  280 test verdicts; with the final skill 65. Same rule SkillOpt learned on GPT-5.5.
+- **Gate overfitting**: iter 4 was accepted on +2 validation tasks (28 vs 26 of 40), yet on test it is
+  6.1 pts *below* the iter-2 skill (CI [−11.4, −0.7]). The strict `>` gate on a 40-task split selects
+  on noise — the paper's own Appendix B caveat; our run shows it on held-out data.
+- Consumption: 1,856 `claude -p` calls, 164M input tokens (mostly cache reads), 11.2M output,
+  ~1,800 API-minutes. Interruptions survived by resume: a network/DNS outage (57 calls re-rolled), a
+  revoked subscription session overnight (26 calls re-rolled after `/login`), a machine sleep (runs now
+  go under `caffeinate`). One extra test eval happened by accident (the iter-2 checkpoint above):
+  after a restart the "no-skill eval" step evaluated the then-current skill — fixed in `ssb-run.sh`.
+
 ## Decisions (resolved 2026-07-01)
 1. **Embedder** — local ONNX bge-m3 int8 (reuse `scripts/embeddings`). Service-less.
 2. **Curator trigger** — **Stop-hook** (auto at session end). `/retro` stays as a manual entry point.
