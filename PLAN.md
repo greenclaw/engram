@@ -148,6 +148,36 @@ agent. Workspace: `~/projects/engram-runs/ssb-haiku-s0` (the Sonnet run will cop
   go under `caffeinate`). One extra test eval happened by accident (the iter-2 checkpoint above):
   after a restart the "no-skill eval" step evaluated the then-current skill — fixed in `ssb-run.sh`.
 
+## WikiSkill — SpreadsheetBench, Sonnet + cross-model transfer (2026-09-29)
+Same split as the Haiku run (copy of `ssb-s0`), `sonnet` = `claude-sonnet-5-5`, 8 iterations.
+Workspace: `~/projects/engram-runs/ssb-sonnet-s0`.
+
+| test (280) | no skill | self-evolved skill | skill of the other model |
+|---|---|---|---|
+| Haiku 4.5 | 31.1% | 62.9% | **75.0%** (Sonnet's skill) |
+| Sonnet 5.5 | 24.6% | **90.4%** | 57.5% (Haiku's skill) |
+
+- Sonnet self-evolution: **+65.7 pts** [+60.0, +71.4] (186 fixed, 2 broken); validation 0.350 → 0.925;
+  accepted iters 1, 2, 4, rejected 3 (tie), 5–7, no_action at 8. 4 of its 27 test failures are the
+  benchmark's unsolvable tasks (ceiling 276/280). Empty-cell failures 201 → 5.
+- **Gains grow with model capability** (the paper's headline): Sonnet is *worse* than Haiku without
+  skills (−6.4 pts [−10.7, −2.1] — it writes formulas more eagerly, which the grader reads as empty
+  cells), yet its self-evolved skill beats Haiku's by 27.5 pts.
+- **Compact skills from the stronger model**: Sonnet's final skill is 44 lines vs Haiku's 544 (the paper
+  sees the same: Gemini/Gemma compact, Qwen long).
+- **Transfer (Table 2)** reproduces both of the paper's patterns:
+  - strong → weak transfers *better than self-evolution*: Haiku with Sonnet's skill 75.0% vs its own
+    62.9% (+12.1 pts [+5.7, +18.2]);
+  - weak → strong is capped by the source: Sonnet with Haiku's skill gains +32.9 over no skill but is
+    32.9 pts below its own skill — Haiku's long, low-level recipe constrains the stronger executor.
+  Skill *discovery* and skill *execution* are separable capabilities, as the paper concludes.
+- Consumption: Sonnet evolution + evals 1,536 calls, 42.8M input / **1.9M output** tokens (Haiku: 11.2M
+  output); cross evals 560 calls. Sonnet's median task: 3 turns, ~1k output tokens, ~9 s API.
+- Environment note: agents (Sonnet's iter-1 skill in particular) tried to recalc formulas with
+  LibreOffice; under the sandbox it never produced a file (0 successful conversions in either run), hung,
+  and opened desktop windows. `/Applications` is now denied in the agent sandbox (#15), so the attempt
+  fails at once, as in the paper's Docker. No result depends on it.
+
 ## Decisions (resolved 2026-07-01)
 1. **Embedder** — local ONNX bge-m3 int8 (reuse `scripts/embeddings`). Service-less.
 2. **Curator trigger** — **Stop-hook** (auto at session end). `/retro` stays as a manual entry point.
