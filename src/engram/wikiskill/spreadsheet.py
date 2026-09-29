@@ -194,8 +194,10 @@ class SpreadsheetBench:
         venv = ws / ".venv"
         sandbox = {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False,
                    # the paper's restriction, enforced: nothing under ~ is readable except the task
-                   # workdir and the agent's Python; writes stay in cwd; network is off by default
-                   "filesystem": {"denyRead": ["~/"],
+                   # workdir and the agent's Python; writes stay in cwd; network is off by default.
+                   # /Applications too: agents launched LibreOffice to recalc formulas; under the sandbox
+                   # it hangs (no profile writes) and opens windows — the paper's Docker has no GUI apps.
+                   "filesystem": {"denyRead": ["~/", "/Applications/"],
                                   "allowRead": [str(workdir), str(venv), str(_python_root(venv))]}}
         return {"tools": ["Bash"], "allowed_tools": ["Bash"], "stream": True, "max_turns": MAX_TURNS,
                 "timeout": SESSION_TIMEOUT,
