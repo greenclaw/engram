@@ -135,7 +135,9 @@ def test_claude_opts_sandbox_env_turns(tmp_path, monkeypatch):
     assert o["timeout"] == 1800  # a 30-turn session can outlast the 900 s default; a timeout is retried forever
     sb = o["settings"]["sandbox"]
     assert sb["enabled"] is True and sb["allowUnsandboxedCommands"] is False
-    assert sb["filesystem"]["denyRead"] == ["~/"]
+    # GUI apps are denied too: agents launched LibreOffice to recalc formulas, it hung under the sandbox
+    # (no profile writes in ~) and opened windows on the user's desktop; the paper's Docker has no apps
+    assert sb["filesystem"]["denyRead"] == ["~/", "/Applications/"]
     assert sb["filesystem"]["allowRead"] == [str(wd), str(ws / ".venv"), "/uv/python/cpython-3.13"]
     assert o["env"]["PATH"].startswith(f"{ws / '.venv/bin'}:") and o["env"]["VIRTUAL_ENV"] == str(ws / ".venv")
 
