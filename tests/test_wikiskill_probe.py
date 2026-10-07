@@ -139,8 +139,18 @@ def test_denial_without_a_working_control_is_inconclusive(tmp_path):
     assert not c.ok and c.inconclusive and "control" in c.detail
     offline = {x.name: x for x in pr.evaluate(GOOD, ["true"], wd, tmp_path / "w", host_net=False)}["deny_network"]
     assert not offline.ok and offline.inconclusive and "offline" in offline.detail
-    no_apps = {x.name: x for x in pr.evaluate(GOOD, ["true"], wd, tmp_path / "w", host_apps=False)}["deny_applications"]
-    assert not no_apps.ok and no_apps.inconclusive
+
+
+def test_deny_applications_is_skipped_on_a_host_without_applications(tmp_path, monkeypatch, capsys):
+    """Linux has no /Applications: nothing there to deny, so the check is SKIP (not a failure)."""
+    c = {x.name: x for x in pr.evaluate(GOOD, ["true"], _wd(tmp_path), tmp_path / "w", host_apps=False)}
+    assert c["deny_applications"].ok and c["deny_applications"].skipped and "no /Applications" in c["deny_applications"].detail
+    ws = tmp_path / "ws"
+    w.init_workspace(ws)
+    (ws / "dataset/meta.json").write_text(json.dumps({"bench": "livemath", "seed": 0}))
+    monkeypatch.setattr(wcli, "run_probe", lambda ws_, bench, *, model: [c["deny_applications"]])
+    assert wcli.run_evolve(argparse.Namespace(evolve_cmd="probe", ws=str(ws), model="haiku")) == 0
+    assert capsys.readouterr().out.startswith("SKIP\tdeny_applications")
 
 
 def test_script_records_the_controls(tmp_path):

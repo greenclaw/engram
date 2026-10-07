@@ -2,10 +2,11 @@
 (`bench.claude_opts` + `run_claude`) before a costly run. The agent only executes a harness-written
 script; verdicts come from the results file it writes and from the filesystem, never from the model's
 own report. Checks: the bench's must-succeed commands (e.g. the venv's python3 imports openpyxl), a
-write inside the workdir works, and reads/writes outside it, the network and /Applications are denied.
+write inside the workdir works, and reads/writes outside it, the network and /Applications are denied
+(the /Applications check is SKIP on a host that has none, e.g. Linux: nothing there to deny).
 
 A denial only counts when its control shows the action COULD have succeeded: a nonzero exit is
-otherwise ambiguous (tool missing, host offline, no /Applications on this host) and would be a
+otherwise ambiguous (tool missing, host offline) and would be a
 vacuous PASS — those cases are reported INCONCLUSIVE, which fails the probe like a FAIL does."""
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ class Check:
     ok: bool
     detail: str
     inconclusive: bool = False
+    skipped: bool = False  # not applicable on this host; counts as ok
 
 
 def probe_script(must_succeed: list[str], outside_read: Path, outside_write: Path) -> str:
@@ -92,8 +94,10 @@ def evaluate(results: dict[str, int], must_succeed: list[str], wd: Path, outside
     checks.append(w)
     checks.append(_denial("deny_network", get("deny_network"), tools and host_net,
                           "the host itself is offline (control)" if tools else why_tools))
-    checks.append(_denial("deny_applications", get("deny_applications"), tools and host_apps,
-                          "this host has no /Applications (control)" if tools else why_tools))
+    if host_apps:
+        checks.append(_denial("deny_applications", get("deny_applications"), tools, why_tools))
+    else:
+        checks.append(Check("deny_applications", True, "this host has no /Applications — nothing to deny", skipped=True))
     return checks
 
 
@@ -108,7 +112,7 @@ def _host_network() -> bool:
 
 
 def _host_apps() -> bool:
-    """Harness-side control: a host without /Applications (Linux) cannot show the deny works."""
+    """A host without /Applications (Linux) has nothing there to deny: the check is skipped."""
     return Path("/Applications").exists()
 
 

@@ -86,7 +86,7 @@ def run_evolve(args) -> int:
             print(f"{bench.name}: the agent has no tools — nothing to probe")
             return 0
         for c in checks:
-            print(f"{'PASS' if c.ok else 'INCONCLUSIVE' if c.inconclusive else 'FAIL'}\t{c.name}\t{c.detail}")
+            print(f"{'SKIP' if c.skipped else 'PASS' if c.ok else 'INCONCLUSIVE' if c.inconclusive else 'FAIL'}\t{c.name}\t{c.detail}")
         return 0 if all(c.ok for c in checks) else 1
     st = load_state(ws)  # status
     print(f"bench={_meta(ws)['bench']} iteration={st['iteration']} R_best={st['r_best']} stopped={st['stopped']}")
