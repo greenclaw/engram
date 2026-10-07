@@ -22,6 +22,7 @@ class ClaudeResult:
     raw: dict = field(default_factory=dict)
     transcript: str = ""  # stream mode: the session's commands, outputs and final text
     hit_max_turns: bool = False
+    tool_calls: list[str] = field(default_factory=list)  # stream mode: each tool call, in order
 
 
 def _exec(argv: list[str], cwd: Path, timeout: int, env: dict | None = None) -> str:
@@ -39,9 +40,9 @@ def _tool_text(content) -> str:
     return "\n".join(c.get("text", "") for c in content or [] if isinstance(c, dict))
 
 
-def _parse_stream(out: str) -> tuple[dict | None, str]:
-    """(final result event, transcript) from `--output-format stream-json --verbose` lines."""
-    result, lines = None, []
+def _parse_stream(out: str) -> tuple[dict | None, str, list[str]]:
+    """(final result event, transcript, tool calls) from `--output-format stream-json --verbose` lines."""
+    result, lines, calls = None, [], []
     for line in out.splitlines():
         try:
             ev = json.loads(line)
@@ -55,12 +56,14 @@ def _parse_stream(out: str) -> tuple[dict | None, str]:
                 t = c.get("type")
                 if t == "tool_use":
                     inp = c.get("input") or {}
-                    lines.append(f"$ {inp['command']}" if "command" in inp else f"[{c.get('name')}] {json.dumps(inp)}")
+                    call = f"$ {inp['command']}" if "command" in inp else f"[{c.get('name')}] {json.dumps(inp)}"
+                    lines.append(call)
+                    calls.append(call)
                 elif t == "tool_result":
                     lines.append(("[error] " if c.get("is_error") else "") + _cap(_tool_text(c.get("content"))))
                 elif t == "text" and kind == "assistant":
                     lines.append(c.get("text", ""))
-    return result, "\n".join(lines)
+    return result, "\n".join(lines), calls
 
 
 def run_claude(prompt: str, *, system: str, model: str, cwd: Path, tools: list[str],
@@ -85,12 +88,12 @@ def run_claude(prompt: str, *, system: str, model: str, cwd: Path, tools: list[s
         out = _exec(argv, cwd, timeout, {**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:  # a hung call is a retryable failure, not a crash of the whole rollout
         return ClaudeResult(text=f"timeout after {timeout}s", structured=None, turns=0, cost_usd=0.0, is_error=True)
-    transcript = ""
+    transcript, calls = "", []
     if stream:
-        d, transcript = _parse_stream(out)
+        d, transcript, calls = _parse_stream(out)
         if d is None:
             return ClaudeResult(text=f"no result event in stream: {out[-200:].strip()!r}", structured=None,
-                                turns=0, cost_usd=0.0, is_error=True, transcript=transcript)
+                                turns=0, cost_usd=0.0, is_error=True, transcript=transcript, tool_calls=calls)
     else:
         try:
             d = json.loads(out)
@@ -103,4 +106,4 @@ def run_claude(prompt: str, *, system: str, model: str, cwd: Path, tools: list[s
     return ClaudeResult(text=str(d.get("result") or ""), structured=d.get("structured_output"),
                         turns=int(d.get("num_turns", 0)), cost_usd=float(d.get("total_cost_usd") or 0.0),
                         is_error=bool(d.get("is_error", False)) and not maxed, raw=d, transcript=transcript,
-                        hit_max_turns=maxed)
+                        hit_max_turns=maxed, tool_calls=calls)
