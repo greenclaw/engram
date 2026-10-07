@@ -1,4 +1,4 @@
-"""`engram evolve init|run|eval|status` — the WikiSkill harness entrypoints."""
+"""`engram evolve init|run|eval|probe|status` — the WikiSkill harness entrypoints."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,7 @@ from engram.wikiskill.loop import (
     load_state,
     usage_of,
 )
+from engram.wikiskill.probe import run_probe
 from engram.wikiskill.workspace import commit_all, init_workspace
 
 
@@ -35,6 +36,9 @@ def add_evolve_parser(sub) -> None:
     pv.add_argument("--model", default="haiku")
     pv.add_argument("--parallel", type=int, default=8)
     pv.add_argument("--skills", default=None, help="another workspace (or its skills/ dir) — cross-model transfer")
+    pp = es.add_parser("probe", help="verify the agent sandbox through the real rollout options (before a costly run)")
+    pp.add_argument("--ws", required=True)
+    pp.add_argument("--model", default="haiku")
     ps = es.add_parser("status", help="print the iteration history")
     ps.add_argument("--ws", required=True)
 
@@ -76,6 +80,14 @@ def run_evolve(args) -> int:
         r = evaluate(ws, bench, split=args.split, model=args.model, parallel=args.parallel, skills_dir=sk)
         print(f"R({args.split}) = {r:.3f} (skills: {sk.parent.name if sk else 'self'})")
         return 0
+    if args.evolve_cmd == "probe":
+        checks = run_probe(ws, bench, model=args.model)
+        if not checks:
+            print(f"{bench.name}: the agent has no tools — nothing to probe")
+            return 0
+        for c in checks:
+            print(f"{'SKIP' if c.skipped else 'PASS' if c.ok else 'INCONCLUSIVE' if c.inconclusive else 'FAIL'}\t{c.name}\t{c.detail}")
+        return 0 if all(c.ok for c in checks) else 1
     st = load_state(ws)  # status
     print(f"bench={_meta(ws)['bench']} iteration={st['iteration']} R_best={st['r_best']} stopped={st['stopped']}")
     print("k\taction\tskill\tval\tbest\toutcome\tcalls\tin_tok\tout_tok\tapi_min")

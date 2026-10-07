@@ -117,6 +117,7 @@ def test_stream_mode_builds_a_transcript_of_commands_and_outputs(monkeypatch, tm
     assert "$ ls" in t and "input.xlsx" in t and "$ python solve.py" in t and "[error]" in t
     assert "x" * 2000 in t and "x" * 2001 not in t and "…[truncated 3000 chars]" in t
     assert t.rstrip().endswith("Saved output.xlsx") and "hmm" not in t
+    assert r.tool_calls == ["$ ls", "$ python solve.py"]  # the calls alone, separate from outputs/text
 
 
 def test_stream_mode_without_result_event_is_error(monkeypatch, tmp_path):

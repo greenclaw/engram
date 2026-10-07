@@ -141,6 +141,7 @@ class SpreadsheetBench:
     name = "spreadsheetbench"
     task_desc = "spreadsheet manipulation tasks by writing and running Python code (openpyxl / pandas) in a bash shell"
     SPLIT_SIZES = {"train": 80, "val": 40, "test": 280}  # Table 6
+    probe_commands = ["python3 -c 'import openpyxl, pandas'"]  # the venv python, not /usr/bin/python3
 
     @staticmethod
     def data_dir(ws: Path) -> Path:
