@@ -69,6 +69,7 @@ def test_run_probe_uses_the_bench_opts_and_cleans_up(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pr, "run_claude", fake_claude)
     monkeypatch.setattr(pr, "_host_network", lambda: True)
+    monkeypatch.setattr(pr, "_host_apps", lambda: True)  # CI is Linux: no /Applications there
     checks = pr.run_probe(ws, ToolBench(), model="haiku")
     assert checks and all(c.ok for c in checks)
     assert seen["tools"] == ["Bash"] and seen["settings"] == {"sandbox": {"enabled": True}}
@@ -161,6 +162,7 @@ def test_integrity_fails_when_the_agent_did_not_run_the_untouched_script(monkeyp
 
     monkeypatch.setattr(pr, "run_claude", tamper)
     monkeypatch.setattr(pr, "_host_network", lambda: True)
+    monkeypatch.setattr(pr, "_host_apps", lambda: True)  # CI is Linux: no /Applications there
     by = {c.name: c for c in pr.run_probe(ws, ToolBench(), model="m")}
     assert not by["script_integrity"].ok and "modified" in by["script_integrity"].detail
     assert "not run" in by["script_integrity"].detail or "bash probe.sh" in by["script_integrity"].detail
@@ -186,5 +188,6 @@ def test_integrity_fails_when_the_agent_ran_anything_besides_the_script(monkeypa
 
     monkeypatch.setattr(pr, "run_claude", forge_after)
     monkeypatch.setattr(pr, "_host_network", lambda: True)
+    monkeypatch.setattr(pr, "_host_apps", lambda: True)  # CI is Linux: no /Applications there
     by = {c.name: c for c in pr.run_probe(ws, ToolBench(), model="m")}
     assert not by["script_integrity"].ok and "other" in by["script_integrity"].detail
