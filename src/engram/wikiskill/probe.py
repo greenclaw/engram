@@ -21,7 +21,6 @@ from engram.wikiskill.claude import run_claude
 
 PROBE_DIR = "work/.probe"  # dot-prefixed: can never collide with a rollout dir under work/
 RESULTS = "probe-results.txt"
-DENIED = ("deny_read_outside", "deny_write_outside", "deny_network", "deny_applications")
 NOT_FOUND = (126, 127)  # not executable / command not found — a broken PATH, not a sandbox denial
 PROBE_URL = "https://example.com"
 
