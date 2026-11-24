@@ -6,6 +6,7 @@ few-hundred-note store a dense matrix + one matmul is plenty — no sqlite-vec, 
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from contextlib import contextmanager
@@ -93,7 +94,7 @@ def build_index(mem_dir) -> int:
     if not mem_dir.is_dir():  # a typo'd --dir must error, not auto-create an empty ghost store
         raise FileNotFoundError(f"memory dir does not exist: {mem_dir}")
     with _lock(mem_dir):
-        return _build(mem_dir)
+        return _build(mem_dir, reuse=False)  # explicit `engram index` = full re-embed (escape hatch)
 
 
 def _ensure_fresh(mem_dir: Path) -> None:
@@ -108,18 +109,51 @@ def _ensure_fresh(mem_dir: Path) -> None:
             _build(mem_dir)
 
 
-def _build(mem_dir: Path) -> int:
+def _text_key(text: str) -> str:
+    """Reuse key for a note's vector: the embedder repo + the exact embedded text — an edit or a model
+    switch (ENGRAM_EMBED_REPO) changes it, so a stale vector is never reused."""
+    repo = os.environ.get("ENGRAM_EMBED_REPO", "BAAI/bge-m3")
+    return hashlib.sha256(f"{repo}\0{text}".encode()).hexdigest()
+
+
+def _row_sha(row) -> str:
+    return hashlib.sha256(np.ascontiguousarray(row, dtype=np.float32).tobytes()).hexdigest()[:16]
+
+
+def _old_vectors(mem_dir: Path) -> dict:
+    """{text key: vector} from the current index; {} if it's missing, corrupt or predates keys.
+    Each reused row must match the digest recorded next to its key: index.npy and meta.json are two
+    files, and a process killed between their writes (hook timeout) leaves a mismatched pair whose
+    rows must not be paired with notes by position."""
+    try:
+        mat, meta = _load(mem_dir)
+        if len(mat) != len(meta):
+            return {}
+        return {m["key"]: mat[i] for i, m in enumerate(meta)
+                if "key" in m and m.get("vsha") == _row_sha(mat[i])}
+    except Exception:  # noqa: BLE001 — a rebuildable cache: any unreadable state means "embed afresh"
+        return {}
+
+
+def _build(mem_dir: Path, reuse: bool = True) -> int:
     # stat() BEFORE reading/embedding: an edit landing during the multi-second embed then differs
     # from the recorded fingerprint, so the next staleness check catches it (edit-during-rebuild race).
     snap = [(p.stat(), parse_note(p)) for p in _iter_notes(mem_dir)]
-    notes = [n for _, n in snap]
+    texts = [_embed_text(n) for _, n in snap]
+    keys = [_text_key(t) for t in texts]
     d, npy, metaf = _paths(mem_dir)
     d.mkdir(parents=True, exist_ok=True)
 
-    vecs = Embedder().encode([_embed_text(n) for n in notes]) if notes else np.zeros((0, 1024), dtype=np.float32)
+    # Incremental: embed only new/changed notes. A full ~300-note embed takes ~40 s, longer than the
+    # 30 s a UserPromptSubmit hook may run — a cancelled rebuild writes nothing, so recall stayed dead.
+    old = _old_vectors(mem_dir) if reuse else {}
+    todo = [i for i, k in enumerate(keys) if k not in old]
+    fresh = dict(zip(todo, Embedder().encode([texts[i] for i in todo]))) if todo else {}
+    rows = [fresh[i] if i in fresh else old[k] for i, k in enumerate(keys)]
+    vecs = np.stack(rows).astype(np.float32) if rows else np.zeros((0, 1024), dtype=np.float32)
 
     meta = []
-    for st, n in snap:
+    for (st, n), key, row in zip(snap, keys, vecs):
         updated = n.updated or date.fromtimestamp(st.st_mtime)
         meta.append({
             "path": str(n.path),
@@ -131,10 +165,12 @@ def _build(mem_dir: Path) -> int:
             "invalidated": bool(n.invalidated_by),
             "mtime_ns": st.st_mtime_ns,
             "size": st.st_size,
+            "key": key,
+            "vsha": _row_sha(row),
         })
     _atomic_write(npy, lambda f: np.save(f, vecs))
     _atomic_write(metaf, lambda f: f.write(json.dumps(meta, ensure_ascii=False, indent=0).encode("utf-8")))
-    return len(notes)
+    return len(snap)
 
 
 def _load(mem_dir: Path):
