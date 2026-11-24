@@ -16,9 +16,74 @@ def default_memory_dir(cwd=None) -> Path | None:
     return d if d.is_dir() else None
 
 
+_STRAIGHT = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'})
+
+
+def _in_store(path: Path) -> bool:
+    """A note of an engram store: under a `memory` dir that holds a MEMORY.md index, or under a Claude
+    auto-memory store (~/.claude/projects/<slug>/memory) — guarded before its index exists."""
+    for d in path.parents:
+        if d.name == "memory":
+            return (d / "MEMORY.md").exists() or d.parent.parent == Path.home() / ".claude" / "projects"
+    return False
+
+
+def check_note() -> int:
+    """PreToolUse hook on Write/Edit: refuse a memory note engram can't read (exit 2, reason on stderr →
+    Claude rewrites it). Never blocks on its own failure. Registered with an `if` path filter, so it
+    only spawns for memory/ files."""
+    import json
+    import os
+    import sys
+
+    if os.environ.get("ENGRAM_DISABLE", "") not in ("", "0"):
+        return 0
+    try:
+        data = json.load(sys.stdin)
+        inp = data.get("tool_input") or {}
+        path = Path(inp.get("file_path") or "")
+        if path.suffix != ".md" or path.name == "MEMORY.md" or not _in_store(path):
+            return 0
+        new = inp.get("new_string") or ""
+        if data.get("tool_name") == "Write":
+            text = inp.get("content") or ""
+        elif data.get("tool_name") == "Edit":
+            old = inp.get("old_string") or ""
+            if not old:  # Edit with an empty old_string creates the file
+                if path.exists():
+                    return 0
+                text = new
+            else:
+                text = path.read_text(encoding="utf-8")
+                if old not in text:  # Claude Code's Edit also matches curly quotes as straight ones
+                    text = text.translate(_STRAIGHT)
+                    if old not in text:
+                        return 0  # the Edit itself will fail; nothing to judge
+                text = text.replace(old, new, -1 if inp.get("replace_all") else 1)
+        else:
+            return 0
+        text = text.replace("\r\n", "\n")  # what read_text gives the indexer on disk
+        from engram.core import frontmatter_error
+
+        err = frontmatter_error(text, path)
+    except Exception:  # noqa: BLE001 — a guard bug must never block a write
+        return 0
+    if err:
+        print(f"engram: memory note frontmatter is not valid — {err}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv=None) -> int:
+    import sys
+
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["check-note"]:  # ponytail: dispatched before the parser — skips the evolve imports (hot path)
+        return check_note()
     p = argparse.ArgumentParser(prog="engram", description="Curated agent memory: service-less semantic recall.")
     sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("check-note", help="PreToolUse hook: refuse a Write/Edit that leaves a memory note's "
+                                       "frontmatter unreadable (stdin hook JSON)")
 
     pi = sub.add_parser("index", help="(re)build the recall index over a memory dir")
     pi.add_argument("--dir", default=None,
@@ -89,22 +154,24 @@ def main(argv=None) -> int:
     if args.cmd == "index":
         import sys
 
+        from engram.core import MemoryNoteError
         from engram.store import build_index
 
         try:
             n = build_index(args.dir)
-        except (FileNotFoundError, ValueError) as e:  # missing dir / bad env knob → clean error, not traceback
+        except (FileNotFoundError, ValueError, MemoryNoteError) as e:  # missing dir / bad env knob → clean error, not traceback
             print(f"engram index: {e}", file=sys.stderr)
             return 1
         print(f"indexed {n} notes → {Path(args.dir) / '.engram'}")
     elif args.cmd == "recall":
         import sys
 
+        from engram.core import MemoryNoteError
         from engram.store import recall
 
         try:
             hits = recall(args.dir, args.query, k=args.k)
-        except (FileNotFoundError, ValueError) as e:
+        except (FileNotFoundError, ValueError, MemoryNoteError) as e:
             print(f"engram recall: {e}", file=sys.stderr)
             return 1
         if args.json:
@@ -126,9 +193,16 @@ def main(argv=None) -> int:
             prompt = (json.load(sys.stdin).get("prompt") or "").strip()
             if len(prompt) < 15 or prompt.startswith("/"):
                 return 0
+            from engram.core import QUOTE_HINT, MemoryNoteError
             from engram.store import recall
 
-            hits = recall(args.dir, prompt, k=args.k)
+            try:
+                hits = recall(args.dir, prompt, k=args.k)
+            except MemoryNoteError as e:  # a bad note slipped past the write guard (Bash/python write)
+                why = " ".join(str(e).split())[:300]  # note-controlled text: one bounded line
+                print(f"engram: semantic recall is OFF for this project until this memory note is fixed — {why}. "
+                      f"Fix its frontmatter ({QUOTE_HINT}).")
+                return 0
             if hits:
                 print("engram semantic recall (background context; verify before asserting — read the full note at its path if it matters):")
                 for h in hits:
