@@ -104,7 +104,53 @@ def _split_frontmatter(text: str, path: Path) -> tuple[dict, str]:
 
 def parse_note(path: Path) -> Note:
     path = Path(path)
-    meta, body = _split_frontmatter(path.read_text(encoding="utf-8"), path)
+    return parse_text(path.read_text(encoding="utf-8"), path)
+
+
+QUOTE_HINT = ('quote the value: description: "..." (escape inner double quotes as \\") '
+              "or description: '...' (double inner single quotes)")
+
+
+def frontmatter_error(text: str, path: Path) -> str | None:
+    """Why engram can't read this note as written, or None. Stricter than parse_note: a name/description/
+    type that YAML turns into a non-string (`description: no` → False, a date) is silently mangled
+    there, so it is an error here — the PreToolUse guard refuses the write before it lands."""
+    path = Path(path)
+    try:
+        parse_text(text, path)
+        meta, _ = _split_frontmatter(text, path)
+    except MemoryNoteError as e:
+        return f"{e}; {QUOTE_HINT}"
+    cut = _comment_cut(_FRONTMATTER.match(text.replace("\r\n", "\n")).group(1)) if meta else None
+    if cut:
+        return (f"{path.name}: unquoted '{cut}' contains ' #', which YAML reads as a comment and drops the rest; "
+                f"if the '#' is part of the text, {QUOTE_HINT}")
+    for key in ("name", "description", "type"):
+        if key in meta and not isinstance(meta[key], str):
+            return (f"{path.name}: '{key}' parses as {type(meta[key]).__name__} "
+                    f"{meta[key]!r}, not text; {QUOTE_HINT}")
+    return None
+
+
+def _comment_cut(front: str) -> str | None:
+    """The name/description key whose unquoted (plain) value a ` #` comment truncates, or None. Uses
+    YAML's own scanner: a plain scalar ends where a comment starts, so the rest of its last line is
+    looked at. A comment after `type:` is allowed — there it's a real comment, not lost text."""
+    lines, toks = front.splitlines(), list(yaml.scan(front))
+    for i, t in enumerate(toks[:-3]):
+        k, colon, v = toks[i + 1], toks[i + 2], toks[i + 3]
+        if (isinstance(t, yaml.KeyToken) and isinstance(k, yaml.ScalarToken) and k.value in ("name", "description")
+                and isinstance(colon, yaml.ValueToken) and isinstance(v, yaml.ScalarToken) and v.plain
+                and v.end_mark.line < len(lines)
+                and lines[v.end_mark.line][v.end_mark.column:].lstrip().startswith("#")):
+            return k.value
+    return None
+
+
+def parse_text(text: str, path: Path) -> Note:
+    meta, body = _split_frontmatter(text, path)
+    if "metadata" in meta and not isinstance(meta["metadata"], (dict, type(None))):
+        raise MemoryNoteError(f"{path.name}: 'metadata' must be a mapping (indented 'type: ...' under it)")
     note_type = meta.get("type") or (meta.get("metadata") or {}).get("type") or _DEFAULT_TYPE
 
     importance = meta.get("importance")
@@ -112,7 +158,7 @@ def parse_note(path: Path) -> Note:
         try:
             importance = float(importance)
         except (TypeError, ValueError):
-            raise MemoryNoteError(f"{path.name}: 'importance' must be a number 0–1, got {importance!r}") from None
+            raise MemoryNoteError(f"{path.name}: 'importance' must be a number 0–1, got {repr(importance)[:40]}") from None
 
     # str-coerce name/type/description: yaml turns `name: 2026-07-01`→date, `description: no`→False, which
     # otherwise crash json.dumps in the index or print as 'False' in context.
